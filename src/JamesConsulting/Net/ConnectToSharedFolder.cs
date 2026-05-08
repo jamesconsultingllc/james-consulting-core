@@ -119,7 +119,11 @@ public sealed class ConnectToSharedFolder : IDisposable
 
     private enum ResourceScope
     {
-        GlobalNetwork
+        Connected = 1,
+        GlobalNetwork = 2,
+        Remembered = 3,
+        Recent = 4,
+        Context = 5
     }
 
     private enum ResourceType
