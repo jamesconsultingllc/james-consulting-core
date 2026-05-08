@@ -75,6 +75,7 @@ public sealed class ConnectToSharedFolder : IDisposable
     /// <summary>
     /// Connects to the network share using the provided credentials.
     /// </summary>
+    /// <exception cref="PlatformNotSupportedException">The current OS is not Windows.</exception>
     /// <exception cref="Win32Exception">The native API returns an error code.</exception>
     /// <example>
     /// Explicit connection.
@@ -87,6 +88,10 @@ public sealed class ConnectToSharedFolder : IDisposable
     [ExcludeFromCodeCoverage]
     public void Connect()
     {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            throw new PlatformNotSupportedException(
+                $"{nameof(ConnectToSharedFolder)}.{nameof(Connect)} requires Windows (uses mpr.dll P/Invoke).");
+
         var netResource = new NetResource { Scope = ResourceScope.GlobalNetwork, ResourceType = ResourceType.Disk };
         var userName = string.IsNullOrEmpty(credentials.Domain)
             ? credentials.UserName

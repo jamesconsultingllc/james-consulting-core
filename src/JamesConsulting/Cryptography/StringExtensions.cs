@@ -20,8 +20,9 @@ public static class StringExtensions
     /// </summary>
     /// <param name="encoded">The Base64 encoded input string.</param>
     /// <param name="encoding">The character encoding to use. Defaults to <see cref="Encoding.Default" /> when null.</param>
-    /// <returns>The decoded textual value, or the original value if <paramref name="encoded" /> is null or empty.</returns>
+    /// <returns>The decoded textual value.</returns>
     /// <remarks>Deprecated: Use <c>Encoding.UTF8.GetString(Convert.FromBase64String(value))</c> directly.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="encoded" /> is <c>null</c>.</exception>
     /// <exception cref="FormatException">Input is not a valid Base64 string.</exception>
     /// <example>
     /// Round-trip encode/decode.
@@ -47,8 +48,9 @@ public static class StringExtensions
     /// </summary>
     /// <param name="decoded">The plain text input string.</param>
     /// <param name="encoding">The character encoding to use. Defaults to <see cref="Encoding.Default" /> when null.</param>
-    /// <returns>The Base64 representation of the input, or the original value if <paramref name="decoded" /> is null or empty.</returns>
+    /// <returns>The Base64 representation of the input; an empty string when input is empty.</returns>
     /// <remarks>Deprecated: Use <c>Convert.ToBase64String(Encoding.UTF8.GetBytes(value))</c> directly.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="decoded" /> is <c>null</c>.</exception>
     /// <example>
     /// Encoding examples.
     /// <code>

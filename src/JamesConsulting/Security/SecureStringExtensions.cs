@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 using System.Security;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Security;
 
@@ -14,6 +15,7 @@ public static class SecureStringExtensions
     /// </summary>
     /// <param name="secureString">The secure string to convert.</param>
     /// <returns>The decrypted string, or <see cref="string.Empty" /> if the secure string length is zero.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="secureString" /> is <c>null</c>.</exception>
     /// <remarks>Caller is responsible for handling sensitive data lifecycle after conversion.</remarks>
     /// <example>
     /// Convert secure string to plain text.
@@ -25,6 +27,7 @@ public static class SecureStringExtensions
     /// </example>
     public static string ConvertToString(this SecureString secureString)
     {
+        Guard.NotNull(secureString);
         if (secureString.Length == 0) return string.Empty;
         var ptr = IntPtr.Zero;
         var result = string.Empty;

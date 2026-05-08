@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -34,8 +35,13 @@ public static class MethodInfoExtensions
     public static string ToInvocationString(this MethodInfo methodInfo, params object[] parameterValues)
     {
         Guard.NotNull(methodInfo);
-        if (!MethodTemplates.ContainsKey(methodInfo)) MethodTemplates[methodInfo] = methodInfo.GetMethodTemplate();
-        var (parameters, template) = MethodTemplates[methodInfo];
+        Guard.NotNull(parameterValues);
+        var (parameters, template) = MethodTemplates.GetOrAdd(methodInfo, mi => mi.GetMethodTemplate());
+        if (parameterValues.Length != parameters.Length)
+            throw new ArgumentException(
+                $"{methodInfo.DeclaringType?.FullName}.{methodInfo.Name} expects " +
+                $"{parameters.Length} parameter value(s); got {parameterValues.Length}.",
+                nameof(parameterValues));
         return BindTemplate(template, parameters, parameterValues);
     }
 

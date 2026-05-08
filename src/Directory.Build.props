@@ -1,5 +1,17 @@
 <Project>
     <PropertyGroup>
+        <!-- Solution-wide metadata. Per-project metadata (PackageId, Description, etc.)
+             still lives in each .csproj. -->
+        <Authors>Rudy James</Authors>
+        <Company>James Consulting LLC</Company>
+        <Copyright>Copyright (c) 2020 - 2026 James Consulting LLC. All Rights Reserved.</Copyright>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <RepositoryUrl>https://github.com/jamesconsultingllc/james-consulting-core</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+
+        <!-- Build behavior -->
+        <Nullable>enable</Nullable>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     </PropertyGroup>
 

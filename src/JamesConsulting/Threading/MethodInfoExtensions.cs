@@ -20,7 +20,10 @@ public static class MethodInfoExtensions
     /// <param name="results">The dynamic results to set on the created task source.</param>
     /// <returns>The created task instance containing the result.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="methodInfo" /> is <c>null</c>.</exception>
-    /// <exception cref="ArgumentException">The method's return type is <c>void</c> instead of a generic task.</exception>
+    /// <exception cref="ArgumentException">
+    /// The method's return type is not a constructed <see cref="System.Threading.Tasks.Task{TResult}" />
+    /// (e.g. <c>void</c> or non-generic <see cref="System.Threading.Tasks.Task" />).
+    /// </exception>
     /// <example>
     /// Create a task result via reflection.
     /// <code>
@@ -33,11 +36,17 @@ public static class MethodInfoExtensions
     public static object? CreateTaskResult(this MethodInfo methodInfo, dynamic results)
     {
         Guard.NotNull(methodInfo);
-        if (methodInfo.ReturnType == Constants.VoidType)
-            throw new ArgumentException($"{methodInfo} has a return type of void.");
+        var returnType = methodInfo.ReturnType;
+        if (returnType == Constants.VoidType
+            || !returnType.IsGenericType
+            || returnType.GetGenericTypeDefinition() != typeof(System.Threading.Tasks.Task<>))
+        {
+            throw new ArgumentException(
+                $"{methodInfo} must return Task<T>; got '{returnType}'.", nameof(methodInfo));
+        }
 
         var resultType =
-            Constants.TaskCompletionSourceType.MakeGenericType(methodInfo.ReturnType.GetGenericArguments());
+            Constants.TaskCompletionSourceType.MakeGenericType(returnType.GetGenericArguments());
         var taskSource = Activator.CreateInstance(resultType);
         var taskType = taskSource.GetObjectType();
         taskType.InvokeMember(SetResult, BindingFlags.Instance | BindingFlags.Public | BindingFlags.InvokeMethod, null,

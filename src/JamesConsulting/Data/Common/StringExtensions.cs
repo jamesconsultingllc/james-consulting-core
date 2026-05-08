@@ -13,7 +13,7 @@ public static class StringExtensions
     /// Removes password related keys from a database connection string for logging or display purposes.
     /// </summary>
     /// <param name="connectionString">The original connection string.</param>
-    /// <returns>The sanitized connection string with password keys removed; original value if null or empty.</returns>
+    /// <returns>The sanitized connection string with password keys removed; an empty string when input is empty.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="connectionString" /> is <c>null</c>.</exception>
     /// <example>
     /// Strip password keys.

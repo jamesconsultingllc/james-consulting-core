@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Threading.Tasks;
 using JamesConsulting.Internal;
 using Microsoft.Extensions.DependencyInjection;
@@ -58,6 +59,6 @@ public static class HostExtensions
     {
         using var scope = host.Services.CreateScope();
         var services = scope.ServiceProvider.GetServices<IHostInitializerAsync>();
-        await Task.Run(() => Parallel.ForEach(services, svc => svc.InitializeAsync())).ConfigureAwait(false);
+        await Task.WhenAll(services.Select(svc => svc.InitializeAsync())).ConfigureAwait(false);
     }
 }
