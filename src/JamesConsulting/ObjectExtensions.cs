@@ -42,8 +42,7 @@ public static class ObjectExtensions
     /// <param name="propertiesToMask">JsonPath-like property names to mask at the root (e.g. <c>Customer.Address</c>).</param>
     /// <returns>A copy of <paramref name="data" /> with targeted properties masked.</returns>
     /// <exception cref="ArgumentNullException">
-    /// <paramref name="data" /> or <paramref name="propertiesToMask" /> is <c>null</c>
-    /// .
+    /// <paramref name="data" /> or <paramref name="propertiesToMask" /> is <c>null</c>.
     /// </exception>
     /// <exception cref="ArgumentException"><paramref name="propertiesToMask" /> is empty.</exception>
     /// <example>

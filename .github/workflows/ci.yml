@@ -38,6 +38,12 @@ jobs:
   build-test:
     name: Build, Test, Analyze
     runs-on: ubuntu-latest
+    env:
+      # Sonar runs only on pushes from this repo (not fork PRs) where SONAR_TOKEN
+      # is available. Forked PRs can't access secrets, so SONAR_TOKEN would be
+      # empty and the begin step would fail. Gating on this env (not directly on
+      # secrets, which can't appear in `if:`) skips Sonar cleanly for forks.
+      SONAR_TOKEN_SET: ${{ secrets.SONAR_TOKEN != '' && 'true' || 'false' }}
 
     steps:
       - name: Checkout
@@ -53,7 +59,7 @@ jobs:
             10.0.x
 
       - name: Setup Java (Sonar scanner requires JRE)
-        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        if: ${{ vars.SONAR_PROJECT_KEY != '' && env.SONAR_TOKEN_SET == 'true' }}
         uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
@@ -63,11 +69,11 @@ jobs:
         run: dotnet restore "$SOLUTION"
 
       - name: Install Sonar scanner
-        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        if: ${{ vars.SONAR_PROJECT_KEY != '' && env.SONAR_TOKEN_SET == 'true' }}
         run: dotnet tool install --global dotnet-sonarscanner
 
       - name: Begin Sonar analysis
-        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        if: ${{ vars.SONAR_PROJECT_KEY != '' && env.SONAR_TOKEN_SET == 'true' }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
@@ -92,7 +98,7 @@ jobs:
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
       - name: End Sonar analysis
-        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        if: ${{ vars.SONAR_PROJECT_KEY != '' && env.SONAR_TOKEN_SET == 'true' }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
