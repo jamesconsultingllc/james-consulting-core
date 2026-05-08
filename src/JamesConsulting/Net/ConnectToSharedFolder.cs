@@ -20,7 +20,7 @@ public sealed class ConnectToSharedFolder : IDisposable
     /// </summary>
     /// <param name="networkName">UNC path of the shared network folder.</param>
     /// <param name="credentials">Credentials used for impersonation.</param>
-    /// <exception cref="ArgumentException">The credential user name is null or whitespace.</exception>
+    /// <exception cref="ArgumentException">The credential username is null or whitespace.</exception>
     /// <example>
     /// Construction and usage.
     /// <code>

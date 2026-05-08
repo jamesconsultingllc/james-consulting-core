@@ -1,0 +1,369 @@
+name: CI
+
+# GitFlow Pattern B — single workflow file (required so NuGet Trusted
+# Publishing can match on a stable filename).
+#
+#   - Push to any tracked branch / PR / workflow_dispatch -> build-test only
+#   - Push to release/**                                  -> build-test + publish-rc
+#                                                            (version: <major>.<minor>.0-rc.<run_number>)
+#   - Push tag v*                                         -> build-test + publish-stable
+#                                                            (version: <major>.<minor>.<patch>; tag must equal version.json
+#                                                             AND commit must be reachable from the stable branch)
+on:
+  push:
+    branches: [develop, main, master, 'feature/**', 'release/**', 'hotfix/**']
+    tags:     ['v*']
+  pull_request:
+    branches: [develop, main, master]
+  workflow_dispatch:
+
+# Cancel stale runs on branch pushes; never cancel a tag publish mid-flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PACKAGE_PROJECT: src/JamesConsulting/JamesConsulting.csproj
+  SOLUTION: src/JamesConsulting.sln
+  STABLE_BRANCH: master  # branch from which v* tags must be cut
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Always-on gating job. Fast feedback loop on Linux for every push/PR/tag.
+  # ─────────────────────────────────────────────────────────────────────────
+  build-test:
+    name: Build, Test, Analyze
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # NBGV + Sonar both need full history
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Setup Java (Sonar scanner requires JRE)
+        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore
+        run: dotnet restore "$SOLUTION"
+
+      - name: Install Sonar scanner
+        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        run: dotnet tool install --global dotnet-sonarscanner
+
+      - name: Begin Sonar analysis
+        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet sonarscanner begin \
+            /k:"${{ vars.SONAR_PROJECT_KEY }}" \
+            /o:"${{ vars.SONAR_ORG }}" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
+            /d:sonar.coverage.exclusions="**/*Tests/**,**/*.Tests/**"
+
+      - name: Build
+        env:
+          CI: 'true'  # activates ContinuousIntegrationBuild for deterministic source paths
+        run: dotnet build "$SOLUTION" --configuration Release --no-restore
+
+      - name: Test (with coverage)
+        run: |
+          dotnet test "$SOLUTION" \
+            --configuration Release \
+            --no-build \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage" \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: End Sonar analysis
+        if: ${{ vars.SONAR_PROJECT_KEY != '' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      - name: Pack (preview, for artifact only)
+        # CI suffix prevents accidental consumption of an unpublished build.
+        # publish-rc / publish-stable below produce the real signed packages.
+        run: |
+          dotnet pack "$PACKAGE_PROJECT" \
+            --configuration Release \
+            --no-build \
+            --output ./artifacts \
+            -p:VersionSuffix="ci.${{ github.run_number }}"
+
+      - name: Upload nupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ github.run_number }}
+          path: ./artifacts/*.nupkg
+          retention-days: 14
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: '**/TestResults/**/*.trx'
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # RC publish — release/** branches only. Only runs after build-test passes.
+  # ─────────────────────────────────────────────────────────────────────────
+  publish-rc:
+    name: Sign & Publish RC
+    needs: build-test
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: windows-latest  # Trusted Signing CLI calls Windows-only APIs.
+    environment: release
+
+    permissions:
+      id-token: write   # Required for OIDC (azure/login + NuGet/login)
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Determine RC version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=$(jq -r '.version' version.json)
+          if [ -z "${VER:-}" ] || [ "$VER" = "null" ]; then
+            echo "::error::Could not read .version from version.json"
+            exit 1
+          fi
+          # version.json may be "2.0" or "2.0.0"; normalise to MAJOR.MINOR.0
+          MAJOR=$(echo "$VER" | cut -d. -f1)
+          MINOR=$(echo "$VER" | cut -d. -f2)
+          PATCH=$(echo "$VER" | cut -d. -f3)
+          PATCH=${PATCH:-0}
+          PREFIX="${MAJOR}.${MINOR}.${PATCH}"
+          VERSION="${PREFIX}-rc.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION (rc) from $PACKAGE_PROJECT"
+
+      - name: Restore
+        run: dotnet restore $env:SOLUTION
+
+      - name: Build
+        env:
+          CI: 'true'
+        run: dotnet build $env:SOLUTION --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack
+        shell: bash
+        run: |
+          dotnet pack "$PACKAGE_PROJECT" \
+            --configuration Release \
+            --no-build \
+            --output ./artifacts \
+            -p:Version=${{ steps.version.outputs.version }}
+
+      # ----- Azure Trusted Signing -----
+      # Federated credential required on the Entra app behind AZURE_CLIENT_ID:
+      #   Subject:  repo:jamesconsultingllc/james-consulting-core:environment:release
+      #   Issuer:   https://token.actions.githubusercontent.com
+      #   Audience: api://AzureADTokenExchange
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install dotnet sign
+        shell: pwsh
+        run: dotnet tool install --global sign --version ${{ vars.SIGN_TOOL_VERSION || '0.9.1-beta.24469.1' }}
+
+      - name: Sign nupkg(s)
+        shell: pwsh
+        run: |
+          sign code trusted-signing `
+            --trusted-signing-endpoint "${{ vars.TRUSTED_SIGNING_ENDPOINT }}" `
+            --trusted-signing-account "${{ vars.TRUSTED_SIGNING_ACCOUNT }}" `
+            --trusted-signing-certificate-profile "${{ vars.TRUSTED_SIGNING_PROFILE }}" `
+            --base-directory "$(Get-Location)\artifacts" `
+            "*.nupkg"
+
+      # ----- NuGet Trusted Publishing (OIDC, no API key) -----
+      # NUGET_USER must be the nuget.org USERNAME of the trust-policy CREATOR.
+      - name: NuGet login (OIDC)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        shell: bash
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Upload signed package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-${{ steps.version.outputs.version }}
+          path: ./artifacts/*.nupkg
+          retention-days: 90
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Stable publish — only on v* tags. Verifies tag matches version.json
+  # and that the tagged commit is reachable from $STABLE_BRANCH.
+  # ─────────────────────────────────────────────────────────────────────────
+  publish-stable:
+    name: Sign & Publish Stable
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    environment: release
+
+    permissions:
+      id-token: write
+      contents: write  # Required by softprops/action-gh-release. RC job does not get this.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Determine stable version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=$(jq -r '.version' version.json)
+          if [ -z "${VER:-}" ] || [ "$VER" = "null" ]; then
+            echo "::error::Could not read .version from version.json"
+            exit 1
+          fi
+          MAJOR=$(echo "$VER" | cut -d. -f1)
+          MINOR=$(echo "$VER" | cut -d. -f2)
+          PATCH=$(echo "$VER" | cut -d. -f3)
+          PATCH=${PATCH:-0}
+          PREFIX="${MAJOR}.${MINOR}.${PATCH}"
+
+          if [[ ! "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Stable tags must match v<MAJOR>.<MINOR>.<PATCH> exactly. Got: ${GITHUB_REF#refs/tags/}"
+            exit 1
+          fi
+
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if [ "$VERSION" != "$PREFIX" ]; then
+            echo "::error::Stable tag v$VERSION must match version.json ($PREFIX)."
+            exit 1
+          fi
+
+          # Tag commit must be on $STABLE_BRANCH so we cannot ship an untested SHA.
+          git fetch origin "$STABLE_BRANCH" --depth=0 >/dev/null 2>&1 || git fetch origin "$STABLE_BRANCH"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$STABLE_BRANCH"; then
+            echo "::error::Tag ${GITHUB_REF#refs/tags/} points at $GITHUB_SHA which is not on origin/$STABLE_BRANCH. Stable tags must be cut from $STABLE_BRANCH."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION (stable) from $PACKAGE_PROJECT"
+
+      - name: Restore
+        run: dotnet restore $env:SOLUTION
+
+      - name: Build
+        env:
+          CI: 'true'
+        run: dotnet build $env:SOLUTION --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Pack
+        shell: bash
+        run: |
+          dotnet pack "$PACKAGE_PROJECT" \
+            --configuration Release \
+            --no-build \
+            --output ./artifacts \
+            -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install dotnet sign
+        shell: pwsh
+        run: dotnet tool install --global sign --version ${{ vars.SIGN_TOOL_VERSION || '0.9.1-beta.24469.1' }}
+
+      - name: Sign nupkg(s)
+        shell: pwsh
+        run: |
+          sign code trusted-signing `
+            --trusted-signing-endpoint "${{ vars.TRUSTED_SIGNING_ENDPOINT }}" `
+            --trusted-signing-account "${{ vars.TRUSTED_SIGNING_ACCOUNT }}" `
+            --trusted-signing-certificate-profile "${{ vars.TRUSTED_SIGNING_PROFILE }}" `
+            --base-directory "$(Get-Location)\artifacts" `
+            "*.nupkg"
+
+      - name: NuGet login (OIDC)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        shell: bash
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Upload signed package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-${{ steps.version.outputs.version }}
+          path: ./artifacts/*.nupkg
+          retention-days: 90
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: ./artifacts/*.nupkg
