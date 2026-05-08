@@ -25,7 +25,6 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
-  actions: write   # actions/upload-artifact@v4 uses the Actions API to create artifact records.
 
 env:
   PACKAGE_PROJECT: src/JamesConsulting/JamesConsulting.csproj
@@ -39,6 +38,10 @@ jobs:
   build-test:
     name: Build, Test, Analyze
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write   # actions/upload-artifact@v4 uses the Actions API to create artifact records.
     env:
       # Sonar runs only on pushes from this repo (not fork PRs) where SONAR_TOKEN
       # is available. Forked PRs can't access secrets, so SONAR_TOKEN would be
