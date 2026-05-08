@@ -171,10 +171,19 @@ public static class StringExtensions
         Rfc2898DeriveBytes.Pbkdf2(bytes, salt, derived, numberOfRounds, effectiveAlgorithm);
         return Convert.ToBase64String(derived);
 #elif NETSTANDARD2_0
-        if (algorithm.HasValue && algorithm.Value != HashAlgorithmName.SHA1)
-            throw new PlatformNotSupportedException(
-                "Custom PBKDF2 hash algorithms require .NET Standard 2.1 or modern .NET (net9.0/net10.0). " +
-                "On the netstandard2.0 target only the legacy SHA1 default is supported.");
+        if (algorithm.HasValue)
+        {
+            // Reject default(HashAlgorithmName) explicitly: its Name is null, which is
+            // not a "custom algorithm" — it's an invalid value supplied by the caller.
+            if (string.IsNullOrEmpty(algorithm.Value.Name))
+                throw new ArgumentException(
+                    "HashAlgorithmName.Name must not be null or empty. Pass null to accept the default, or specify a valid algorithm.",
+                    nameof(algorithm));
+            if (algorithm.Value != HashAlgorithmName.SHA1)
+                throw new PlatformNotSupportedException(
+                    "Custom PBKDF2 hash algorithms require .NET Standard 2.1 or modern .NET (net9.0/net10.0). " +
+                    "On the netstandard2.0 target only the legacy SHA1 default is supported.");
+        }
         using var rfc2898DeriveBytes = new Rfc2898DeriveBytes(Encoding.UTF8.GetBytes(target), salt, numberOfRounds);
         var hash = rfc2898DeriveBytes.GetBytes(32);
         return Convert.ToBase64String(hash);

@@ -103,6 +103,10 @@ public static class ObjectExtensions
     {
         Guard.NotNull(obj);
         Guard.NotNull(stream);
+        if (!stream.CanWrite)
+            throw new ArgumentException("Stream must be writable.", nameof(stream));
+        if (!stream.CanSeek)
+            throw new ArgumentException("Stream must be seekable so the position can be reset to 0.", nameof(stream));
         JsonSerializer.Serialize(stream, obj);
         stream.Position = 0;
         return stream;
