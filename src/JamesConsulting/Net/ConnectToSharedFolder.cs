@@ -92,18 +92,23 @@ public sealed class ConnectToSharedFolder : IDisposable
             throw new PlatformNotSupportedException(
                 $"{nameof(ConnectToSharedFolder)}.{nameof(Connect)} requires Windows (uses mpr.dll P/Invoke).");
 
-        var netResource = new NetResource { Scope = ResourceScope.GlobalNetwork, ResourceType = ResourceType.Disk };
+        var netResource = new NetResource
+        {
+            Scope = ResourceScope.GlobalNetwork,
+            ResourceType = ResourceType.Disk,
+            RemoteName = networkName
+        };
         var userName = string.IsNullOrEmpty(credentials.Domain)
             ? credentials.UserName
-            : $@"{credentials.Domain}\\{credentials.UserName}";
+            : $@"{credentials.Domain}\{credentials.UserName}";
         var result = WNetAddConnection2(netResource, credentials.Password, userName, 0);
         if (result != 0) throw new Win32Exception(result, "Error connecting to remote share");
     }
 
-    [DllImport("mpr.dll")]
+    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
     private static extern int WNetAddConnection2(NetResource netResource, string password, string username, int flags);
 
-    [DllImport("mpr.dll")]
+    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
     private static extern int WNetCancelConnection2(string name, int flags, bool force);
 
     private enum ResourceScope
@@ -116,11 +121,17 @@ public sealed class ConnectToSharedFolder : IDisposable
         Disk = 1
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     [ExcludeFromCodeCoverage]
     private sealed class NetResource
     {
         public ResourceScope Scope { get; set; }
         public ResourceType ResourceType { get; set; }
+        public int DisplayType { get; set; }
+        public int Usage { get; set; }
+        public string? LocalName { get; set; }
+        public string? RemoteName { get; set; }
+        public string? Comment { get; set; }
+        public string? Provider { get; set; }
     }
 }

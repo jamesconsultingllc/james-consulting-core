@@ -42,15 +42,6 @@ public static class Constants
     public static readonly Type VoidType = typeof(void);
 
     /// <summary>
-    /// Cache mapping <see cref="MethodInfo" /> instances to precomputed formatting templates.
-    /// </summary>
-    public static ConcurrentDictionary<MethodInfo, (ParameterInfo[] Parameters, string Template)> MethodTemplates
-    {
-        get;
-        private set;
-    } = new();
-
-    /// <summary>
     /// Cache mapping <see cref="Type" /> instances to their discovered public methods.
     /// </summary>
     public static ConcurrentDictionary<Type, MethodInfo[]> TypeMethods { get; private set; } = new();

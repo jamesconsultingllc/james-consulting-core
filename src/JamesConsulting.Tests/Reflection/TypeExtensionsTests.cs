@@ -21,7 +21,7 @@ public class TypeExtensionsTests
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
-    public void GetMethodInfoFromStringEmptyOrWhitespaceMethodThrowsArgumentOutOfRangeException(string method)
+    public void GetMethodInfoFromStringEmptyOrWhitespaceMethodThrowsArgumentException(string method)
     {
         Assert.Throws<ArgumentException>(() => typeof(string).GetMethodInfoFromString(method));
     }
@@ -41,7 +41,7 @@ public class TypeExtensionsTests
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
-    public void ToMethodInfoThrowsArgumentOutOfRangeExceptionInvalidString(string test)
+    public void ToMethodInfoThrowsArgumentExceptionInvalidString(string test)
     {
         Assert.Throws<ArgumentException>(() => InstanceType.GetMethodInfoFromString(test));
     }
