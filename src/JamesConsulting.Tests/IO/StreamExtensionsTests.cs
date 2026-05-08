@@ -50,6 +50,25 @@ public class StreamExtensionsTests
     }
 
     [Fact]
+    public void IsExecutableThrowsArgumentExceptionWhenStreamIsNotReadable()
+    {
+        using var ms = new MemoryStream(new byte[] { (byte)'M', (byte)'Z' }, writable: false);
+        using var writeOnly = new WriteOnlyStream();
+        var ex = Assert.Throws<ArgumentException>(() => writeOnly.IsExecutable());
+        ex.ParamName.Should().Be("stream");
+        ex.Message.Should().Contain("readable");
+    }
+
+    [Fact]
+    public void IsExecutableThrowsArgumentExceptionWhenStreamIsNotSeekable()
+    {
+        using var nonSeekable = new NonSeekableReadStream(new byte[] { (byte)'M', (byte)'Z' });
+        var ex = Assert.Throws<ArgumentException>(() => nonSeekable.IsExecutable());
+        ex.ParamName.Should().Be("stream");
+        ex.Message.Should().Contain("seek");
+    }
+
+    [Fact]
     public void DeserializeThrowsArgumentNullExceptionWhenStreamIsNull()
     {
         Assert.Throws<ArgumentNullException>(() => default(Stream)!.Deserialize<object>());
@@ -87,7 +106,7 @@ public class StreamExtensionsTests
 
         public override int GetHashCode()
         {
-#if NET462 || NETSTANDARD2_0
+#if NETSTANDARD2_0
                 var hashcode = 35203352;
                 var offset = -1521134295;
                 hashcode *= offset + Property1.GetHashCode();
@@ -97,5 +116,40 @@ public class StreamExtensionsTests
             return HashCode.Combine(Property1, Property2);
 #endif
         }
+    }
+
+    private sealed class WriteOnlyStream : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => true;
+        public override bool CanWrite => true;
+        public override long Length => 0;
+        public override long Position { get; set; }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => 0;
+        public override void SetLength(long value) { }
+        public override void Write(byte[] buffer, int offset, int count) { }
+    }
+
+    private sealed class NonSeekableReadStream : Stream
+    {
+        private readonly MemoryStream _inner;
+        public NonSeekableReadStream(byte[] data) { _inner = new MemoryStream(data); }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() => _inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing) { if (disposing) _inner.Dispose(); base.Dispose(disposing); }
     }
 }

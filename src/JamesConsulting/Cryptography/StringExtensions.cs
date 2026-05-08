@@ -170,11 +170,11 @@ public static class StringExtensions
             Span<byte> derived = stackalloc byte[32];
             Rfc2898DeriveBytes.Pbkdf2(bytes, salt, derived, numberOfRounds, effectiveAlgorithm);
             return Convert.ToBase64String(derived);
-#elif NET462 || NETSTANDARD2_0
+#elif NETSTANDARD2_0
         if (algorithm.HasValue && algorithm.Value != HashAlgorithmName.SHA1)
             throw new PlatformNotSupportedException(
-                "Custom PBKDF2 hash algorithms require .NET Standard 2.1, .NET Framework 4.7.2, or .NET 8 or later. " +
-                "On the current target framework, only the legacy SHA1 default is supported.");
+                "Custom PBKDF2 hash algorithms require .NET Standard 2.1 or modern .NET (net9.0/net10.0). " +
+                "On the netstandard2.0 target only the legacy SHA1 default is supported.");
         using var rfc2898DeriveBytes = new Rfc2898DeriveBytes(Encoding.UTF8.GetBytes(target), salt, numberOfRounds);
         var hash = rfc2898DeriveBytes.GetBytes(32);
         return Convert.ToBase64String(hash);

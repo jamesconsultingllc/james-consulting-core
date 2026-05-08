@@ -16,7 +16,16 @@ public static class StreamExtensions
     /// <param name="stream">The stream to inspect. Must be readable and seekable.</param>
     /// <returns><c>true</c> if the first two bytes match "MZ"; otherwise <c>false</c>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="stream" /> is <c>null</c>.</exception>
-    /// <remarks>The original <see cref="Stream.Position" /> is restored on return.</remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="stream" /> is not readable (<see cref="Stream.CanRead" /> is <c>false</c>) or
+    /// not seekable (<see cref="Stream.CanSeek" /> is <c>false</c>). The MZ signature lives at offset 0,
+    /// so the implementation must seek to <c>0</c> and restore the original <see cref="Stream.Position" />.
+    /// </exception>
+    /// <remarks>
+    /// The original <see cref="Stream.Position" /> is restored on return. Non-seekable streams
+    /// (e.g. <c>NetworkStream</c>) are rejected up front to avoid raising an opaque
+    /// <see cref="NotSupportedException" /> from inside the read/restore sequence.
+    /// </remarks>
     /// <example>
     /// Detect executable signature.
     /// <code>
@@ -35,6 +44,12 @@ public static class StreamExtensions
     public static bool IsExecutable(this Stream stream)
     {
         Guard.NotNull(stream);
+        if (!stream.CanRead)
+            throw new ArgumentException("Stream must be readable.", nameof(stream));
+        if (!stream.CanSeek)
+            throw new ArgumentException(
+                "Stream must support seeking so the original Position can be restored.", nameof(stream));
+
         var originalPosition = stream.Position;
         try
         {

@@ -108,7 +108,7 @@ namespace System.Runtime.CompilerServices
 }
 #endif
 
-#if NETSTANDARD2_0 || NET462
+#if NETSTANDARD2_0
 namespace System.Diagnostics.CodeAnalysis
 {
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property |
