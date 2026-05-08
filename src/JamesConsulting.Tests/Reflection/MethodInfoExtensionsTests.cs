@@ -45,4 +45,22 @@ public class MethodInfoExtensionsTests
     {
         Assert.Throws<ArgumentNullException>(() => default(MethodInfo)!.ToInvocationString(default!));
     }
+
+    [Fact]
+    public void ToInvocationStringNullParameterValuesThrowsArgumentNullException()
+    {
+        var methodInfo = typeof(string).GetMethod("Insert", new[] { typeof(int), typeof(string) })!;
+        var ex = Assert.Throws<ArgumentNullException>(() => methodInfo.ToInvocationString(null!));
+        ex.ParamName.Should().Be("parameterValues");
+    }
+
+    [Fact]
+    public void ToInvocationStringParameterCountMismatchThrowsArgumentException()
+    {
+        var methodInfo = typeof(string).GetMethod("Insert", new[] { typeof(int), typeof(string) })!;
+        var ex = Assert.Throws<ArgumentException>(() => methodInfo.ToInvocationString(3));
+        ex.ParamName.Should().Be("parameterValues");
+        ex.Message.Should().Contain("expects 2 parameter value");
+        ex.Message.Should().Contain("got 1");
+    }
 }

@@ -56,9 +56,13 @@ This is a **breaking** modernization. If you're upgrading from `1.x`, read this 
   `net9.0`, `net10.0`. Removed: `net5.0`, `net6.0`, `net7.0`, `net8.0`, `net462`, `netcoreapp3.1`.
 - **Removed Metalama / PostSharp dependencies.** Argument validation that previously relied on
   Metalama contracts (`[Required]`, `[NotEmpty]`, `[StrictlyPositive]`, etc.) is now provided by an
-  internal `Guard` helper modelled on `ArgumentNullException.ThrowIfNull`. Behaviour, exception
-  types, and `ParamName`s are preserved — so consumers should see no observable difference at
-  runtime, but the library no longer pulls Metalama into your build graph.
+  internal `Guard` helper modelled on `ArgumentNullException.ThrowIfNull`. Exception **types**
+  (`ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException`) and `ParamName`
+  values are preserved against the v1.x contract. **Exception messages and a few specific shapes
+  changed** — most notably `MethodInfoExtensions.CreateTaskResult` now throws a clear
+  `ArgumentException` for non-`Task<T>` return types instead of bubbling a reflection-internal
+  `ArgumentException` out of `MakeGenericType`. The library no longer pulls Metalama into your
+  build graph.
 - **Trimmed transitive surface.** Single hosting reference (`Microsoft.Extensions.Hosting.Abstractions 10.0.0`).
 - **macOS / Linux behavior.** `ConnectToSharedFolder.Connect()` throws
   `PlatformNotSupportedException` on non-Windows OSes (it wraps Win32 `WNetAddConnection2W`).

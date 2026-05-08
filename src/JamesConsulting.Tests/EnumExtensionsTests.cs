@@ -30,10 +30,11 @@ public class EnumExtensionsTests
     }
 
     /// <summary>
-    /// The get description_ enum has description attribute.
+    /// Asserts that calling GetDescription with an undefined enum value
+    /// (no Description attribute can be resolved) returns null rather than throwing.
     /// </summary>
     [Fact]
-    public void GetDescription_InvalidEnum_ThrowsInvalidOperationException()
+    public void GetDescription_InvalidEnumValue_ReturnsNull()
     {
         var description = ((MyOptions)3).GetDescription();
         description.Should().BeNull();

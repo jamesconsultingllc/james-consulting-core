@@ -12,6 +12,11 @@
         <!-- Build behavior -->
         <Nullable>enable</Nullable>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <!-- Reproducible builds: identical sources -> bit-identical assemblies. -->
+        <Deterministic>true</Deterministic>
+        <!-- Embed sources that aren't tracked by git into the PDB so SourceLink
+             can step into generated/derived files. -->
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
         <!--
             Only enable on CI. Locally this rewrites source paths and disables
             timestamp-based optimizations, slowing inner-loop builds and

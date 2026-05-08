@@ -27,6 +27,16 @@ public class MethodInfoExtensionsTests
     }
 
     [Fact]
+    public void CreateTaskResultNonGenericTaskReturnTypeThrowsArgumentException()
+    {
+        // TestAsync returns System.Threading.Tasks.Task (non-generic) — no T to bind a result to.
+        var ex = Assert.Throws<ArgumentException>(() =>
+            InstanceType.GetMethod("TestAsync")!.CreateTaskResult(default!));
+        ex.ParamName.Should().Be("methodInfo");
+        ex.Message.Should().Contain("Task<T>");
+    }
+
+    [Fact]
     public void CreateTaskResultThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() => default(MethodInfo)!.CreateTaskResult(default!));
