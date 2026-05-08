@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Hosting
 {
@@ -25,8 +25,9 @@ namespace JamesConsulting.Hosting
         /// host.Initialize();
         /// </code>
         /// </example>
-        public static void Initialize([NotNull] this IHost host)
+        public static void Initialize(this IHost host)
         {
+            Guard.NotNull(host);
             using var scope = host.Services.CreateScope();
             var services = scope.ServiceProvider.GetServices<IHostInitializer>();
             Parallel.ForEach(services, svc => svc.Initialize());
@@ -47,8 +48,9 @@ namespace JamesConsulting.Hosting
         /// await host.InitializeAsync();
         /// </code>
         /// </example>
-        public static Task InitializeAsync([NotNull] this IHost host)
+        public static Task InitializeAsync(this IHost host)
         {
+            Guard.NotNull(host);
             return host.InitializeInternalAsync();
         }
 

@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Net.Http
 {
@@ -27,8 +27,10 @@ namespace JamesConsulting.Net.Http
         /// // Now only X-Test and X-Other remain.
         /// </code>
         /// </example>
-        public static HttpRequestMessage SetHeaders([NotNull] this HttpRequestMessage httpRequestMessage, [NotNull] IDictionary<string, string> headers)
+        public static HttpRequestMessage SetHeaders(this HttpRequestMessage httpRequestMessage, IDictionary<string, string> headers)
         {
+            Guard.NotNull(httpRequestMessage);
+            Guard.NotNull(headers);
             if (httpRequestMessage.Headers.Any()) httpRequestMessage.Headers.Clear();
             foreach (var headerKey in headers.Keys) httpRequestMessage.Headers.Add(headerKey, headers[headerKey]);
             return httpRequestMessage;

@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Reflection;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Threading
 {
@@ -29,8 +29,9 @@ namespace JamesConsulting.Threading
         /// var result = await typedTask; // result.X == 1
         /// </code>
         /// </example>
-        public static object? CreateTaskResult([NotNull] this MethodInfo methodInfo, dynamic results)
+        public static object? CreateTaskResult(this MethodInfo methodInfo, dynamic results)
         {
+            Guard.NotNull(methodInfo);
             if (methodInfo.ReturnType == Constants.VoidType)
                 throw new ArgumentException($"{methodInfo} has a return type of void.");
 

@@ -2,7 +2,7 @@
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Reflection;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Reflection
 {
@@ -28,8 +28,10 @@ namespace JamesConsulting.Reflection
         /// var missing = typeof(string).GetMethodInfoFromString("NonExistent"); // null
         /// </code>
         /// </example>
-        public static MethodInfo? GetMethodInfoFromString([NotNull] this Type type, [Required] string method)
+        public static MethodInfo? GetMethodInfoFromString(this Type type, string method)
         {
+            Guard.NotNull(type);
+            Guard.Required(method);
             if (Methods.TryGetValue(method, out var s)) return s;
             MethodInfo[] methods;
             if (Constants.TypeMethods.TryGetValue(type, out var typeMethod)) methods = typeMethod;
@@ -56,8 +58,9 @@ namespace JamesConsulting.Reflection
         /// var noResult2 = typeof(MyInterface).GetMethod("TestAsync")!.HasReturnValue();
         /// </code>
         /// </example>
-        public static bool HasReturnValue([NotNull] this MethodInfo methodInfo)
+        public static bool HasReturnValue(this MethodInfo methodInfo)
         {
+            Guard.NotNull(methodInfo);
             return methodInfo.ReturnType != Constants.VoidType && methodInfo.ReturnType != Constants.TaskType;
         }
 
@@ -73,8 +76,9 @@ namespace JamesConsulting.Reflection
         /// var notAsync = typeof(MyInterface).GetMethod("Test")!.IsAsync();
         /// </code>
         /// </example>
-        public static bool IsAsync([NotNull] this MethodInfo methodInfo)
+        public static bool IsAsync(this MethodInfo methodInfo)
         {
+            Guard.NotNull(methodInfo);
             return Constants.TaskType.IsAssignableFrom(methodInfo.ReturnType);
         }
 
@@ -91,8 +95,9 @@ namespace JamesConsulting.Reflection
         /// var syncMethod = typeof(MyInterface).GetMethod("Test")!.IsAsyncWithResult();
         /// </code>
         /// </example>
-        public static bool IsAsyncWithResult([NotNull] this MethodInfo methodInfo)
+        public static bool IsAsyncWithResult(this MethodInfo methodInfo)
         {
+            Guard.NotNull(methodInfo);
             return methodInfo.ReturnType != Constants.TaskType && Constants.TaskType.IsAssignableFrom(methodInfo.ReturnType);
         }
 
@@ -109,8 +114,9 @@ namespace JamesConsulting.Reflection
         /// var interfaceType = typeof(IDisposable).IsConcreteClass();
         /// </code>
         /// </example>
-        public static bool IsConcreteClass([NotNull] this Type type)
+        public static bool IsConcreteClass(this Type type)
         {
+            Guard.NotNull(type);
             return !type.IsAbstract && !type.IsInterface;
         }
     }

@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Data.Common;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Data.Common
 {
@@ -25,9 +25,11 @@ namespace JamesConsulting.Data.Common
         /// </code>
         /// </example>
         public static void RemoveKeys(
-            [NotNull] this DbConnectionStringBuilder connectionStringBuilder,
-            [NotNull][NotEmpty] params string[] keys)
+            this DbConnectionStringBuilder connectionStringBuilder,
+            params string[] keys)
         {
+            Guard.NotNull(connectionStringBuilder);
+            Guard.NotNullOrEmpty(keys);
             Array.ForEach(
                 keys,
                 key =>

@@ -1,5 +1,5 @@
 ﻿using System;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting
 {
@@ -24,8 +24,9 @@ namespace JamesConsulting
         /// var emptyRoundTrip = Array.Empty&lt;byte&gt;().GetString(); // ""
         /// </code>
         /// </example>
-        public static string GetString([NotNull] this byte[] bytes)
+        public static string GetString(this byte[] bytes)
         {
+            Guard.NotNull(bytes);
             if (bytes.Length == 0) return string.Empty;
 
             var chars = new char[bytes.Length / sizeof(char)];

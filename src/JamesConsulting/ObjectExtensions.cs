@@ -2,7 +2,7 @@
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json.Linq;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 using Utf8Json;
 
 namespace JamesConsulting
@@ -51,8 +51,10 @@ namespace JamesConsulting
         /// // masked.Value2 == 0
         /// </code>
         /// </example>
-        public static T Mask<T>([NotNull] this T data, [NotNull][NotEmpty] params string[] propertiesToMask)
+        public static T Mask<T>(this T data, params string[] propertiesToMask)
         {
+            Guard.NotNull(data as object, nameof(data));
+            Guard.NotNullOrEmpty(propertiesToMask);
             var jo = JObject.FromObject(data!);
             foreach (var propertyToMask in propertiesToMask)
             {
@@ -93,8 +95,10 @@ namespace JamesConsulting
         /// var length = jsonStream.Length; // > 0
         /// </code>
         /// </example>
-        public static Stream SerializeToJsonStream([NotNull] this object obj, [NotNull] Stream stream)
+        public static Stream SerializeToJsonStream(this object obj, Stream stream)
         {
+            Guard.NotNull(obj);
+            Guard.NotNull(stream);
             JsonSerializer.Serialize(stream, obj);
             stream.Position = 0;
             return stream;
@@ -112,8 +116,9 @@ namespace JamesConsulting
         /// var str = ((object)"test").ToJson(); // "test"
         /// </code>
         /// </example>
-        public static string ToJson([NotNull] this object obj)
+        public static string ToJson(this object obj)
         {
+            Guard.NotNull(obj);
             return obj switch
             {
                 string objString => objString,

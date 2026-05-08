@@ -2,7 +2,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Threading;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting
 {
@@ -27,12 +27,9 @@ namespace JamesConsulting
         /// </code>
         /// </example>
         [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1650:ElementDocumentationMustBeSpelledCorrectly", Justification = "Reviewed.")]
-#if NETSTANDARD2_1
-        public static byte[] GetBytes([Metalama.Patterns.Contracts.NotNull] this string arg)
-#else
-        public static byte[] GetBytes([Metalama.Patterns.Contracts.NotNull] this string arg)
-#endif
+        public static byte[] GetBytes(this string arg)
         {
+            Guard.NotNull(arg);
             if (arg.Length == 0) return Array.Empty<byte>();
             var bytes = new byte[arg.Length * sizeof(char)];
             Buffer.BlockCopy(arg.ToCharArray(), 0, bytes, 0, bytes.Length);
@@ -53,8 +50,9 @@ namespace JamesConsulting
         /// var unchangedEmpty = string.Empty.ToTitleCase(); // ""
         /// </code>
         /// </example>
-        public static string ToTitleCase([Metalama.Patterns.Contracts.NotNull] this string arg, CultureInfo? ci = null)
+        public static string ToTitleCase(this string arg, CultureInfo? ci = null)
         {
+            Guard.NotNull(arg);
             if (arg.Length == 0) return arg;
             return ci != null ? ci.TextInfo.ToTitleCase(arg) : Thread.CurrentThread.CurrentUICulture.TextInfo.ToTitleCase(arg);
         }
@@ -74,12 +72,10 @@ namespace JamesConsulting
         /// var emptyResult = string.Empty.Truncate(100); // ""
         /// </code>
         /// </example>
-#if NETSTANDARD2_1
-        public static string Truncate([Metalama.Patterns.Contracts.NotNull] this string argument, [StrictlyPositive] int length)
-#else
-        public static string Truncate([Metalama.Patterns.Contracts.NotNull] this string argument, [StrictlyPositive] int length)
-#endif
+        public static string Truncate(this string argument, int length)
         {
+            Guard.NotNull(argument);
+            Guard.StrictlyPositive(length);
             return argument.Length == 0 ? string.Empty : argument.Substring(0, length);
         }
     }

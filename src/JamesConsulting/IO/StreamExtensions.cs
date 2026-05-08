@@ -2,7 +2,7 @@
 using System.IO;
 using System.Text;
 using Newtonsoft.Json;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.IO
 {
@@ -32,8 +32,9 @@ namespace JamesConsulting.IO
         /// var isExe2 = nonExe.IsExecutable(); // false
         /// </code>
         /// </example>
-        public static bool IsExecutable([NotNull] this Stream stream)
+        public static bool IsExecutable(this Stream stream)
         {
+            Guard.NotNull(stream);
             var firstBytes = new byte[2];
             stream.Position = 0;
             var read = stream.Read(firstBytes, 0, 2);
@@ -68,9 +69,9 @@ namespace JamesConsulting.IO
         /// var roundTrip = jsonStream.Deserialize&lt;MyClass&gt;();
         /// </code>
         /// </example>
-        public static T? Deserialize<T>([NotNull] this Stream stream)
+        public static T? Deserialize<T>(this Stream stream)
         {
-            if (stream == null) throw new ArgumentNullException(nameof(stream));
+            Guard.NotNull(stream);
             using var sr = new StreamReader(stream);
             using JsonReader reader = new JsonTextReader(sr);
             var serializer = new JsonSerializer();

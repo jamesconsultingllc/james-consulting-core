@@ -3,7 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Runtime.InteropServices;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Net
 {
@@ -29,8 +29,10 @@ namespace JamesConsulting.Net
         /// // share.Connect();
         /// </code>
         /// </example>
-        public ConnectToSharedFolder([Required] string networkName, [Metalama.Patterns.Contracts.NotNull] NetworkCredential credentials)
+        public ConnectToSharedFolder(string networkName, NetworkCredential credentials)
         {
+            Guard.Required(networkName);
+            Guard.NotNull(credentials);
             if (string.IsNullOrWhiteSpace(credentials.UserName)) throw new ArgumentException("UserName specified cannot be null or whitespace.", nameof(credentials));
             this.networkName = networkName;
             this.credentials = credentials;
@@ -42,7 +44,10 @@ namespace JamesConsulting.Net
         [ExcludeFromCodeCoverage]
         ~ConnectToSharedFolder()
         {
-            WNetCancelConnection2(networkName, 0, true);
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                WNetCancelConnection2(networkName, 0, true);
+            }
         }
 
         private enum ResourceScope
@@ -90,7 +95,10 @@ namespace JamesConsulting.Net
         [ExcludeFromCodeCoverage]
         public void Dispose()
         {
-            WNetCancelConnection2(networkName, 0, true);
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                WNetCancelConnection2(networkName, 0, true);
+            }
             GC.SuppressFinalize(this);
         }
 

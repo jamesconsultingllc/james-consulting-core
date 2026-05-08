@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Security.Cryptography;
 using System.Text;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 using System.Diagnostics.CodeAnalysis;
 
 namespace JamesConsulting.Cryptography
@@ -33,8 +33,9 @@ namespace JamesConsulting.Cryptography
         /// </example>
         [Obsolete("Use Encoding.UTF8.GetString(Convert.FromBase64String(value)) instead.")]
         [SuppressMessage("CodeQuality", "S1133:Deprecated code should be removed", Justification = "Kept for backward compatibility; will be removed in next major release.")]
-        public static string Base64Decode([Metalama.Patterns.Contracts.NotNull] this string encoded, Encoding? encoding = null)
+        public static string Base64Decode(this string encoded, Encoding? encoding = null)
         {
+            Guard.NotNull(encoded);
             if (string.IsNullOrEmpty(encoded)) return encoded;
             var bytes = Convert.FromBase64String(encoded);
             return (encoding ?? Encoding.Default).GetString(bytes);
@@ -56,8 +57,9 @@ namespace JamesConsulting.Cryptography
         /// </example>
         [Obsolete("Use Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) instead.")]
         [SuppressMessage("CodeQuality", "S1133:Deprecated code should be removed", Justification = "Kept for backward compatibility; will be removed in next major release.")]
-        public static string Base64Encode([Metalama.Patterns.Contracts.NotNull] this string decoded, Encoding? encoding = null)
+        public static string Base64Encode(this string decoded, Encoding? encoding = null)
         {
+            Guard.NotNull(decoded);
             if (string.IsNullOrEmpty(decoded)) return decoded;
             var bytes = (encoding ?? Encoding.Default).GetBytes(decoded);
             return Convert.ToBase64String(bytes);
@@ -110,10 +112,12 @@ namespace JamesConsulting.Cryptography
         /// </code>
         /// </example>
         public static (string hashedString, byte[] salt) Hash(
-            [Metalama.Patterns.Contracts.NotNull][NotEmpty] this string target,
-            [StrictlyPositive] int numberOfRounds = 100_000,
+            this string target,
+            int numberOfRounds = 100_000,
             HashAlgorithmName? algorithm = null)
         {
+            Guard.NotNullOrEmpty(target);
+            Guard.StrictlyPositive(numberOfRounds);
             var salt = GenerateSalt();
             var hashedString = target.Hash(salt, numberOfRounds, algorithm);
             return (hashedString, salt);
@@ -142,11 +146,14 @@ namespace JamesConsulting.Cryptography
         /// </example>
         [SuppressMessage("Security", "S5344:Use at least 100,000 iterations and a state-of-the-art digest algorithm here.", Justification = "Minimum 100,000 enforced; SHA256 selected by default.")]
         public static string Hash(
-            [Metalama.Patterns.Contracts.NotNull][NotEmpty] this string target,
-            [Metalama.Patterns.Contracts.NotNull][NotEmpty] byte[] salt,
-            [StrictlyPositive] int numberOfRounds = 100_000,
+            this string target,
+            byte[] salt,
+            int numberOfRounds = 100_000,
             HashAlgorithmName? algorithm = null)
         {
+            Guard.NotNullOrEmpty(target);
+            Guard.NotNullOrEmpty(salt);
+            Guard.StrictlyPositive(numberOfRounds);
             if (numberOfRounds < 100_000)
                 throw new ArgumentOutOfRangeException(nameof(numberOfRounds), "Iteration count must be >= 100,000.");
 

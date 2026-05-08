@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-using Metalama.Patterns.Contracts;
+using JamesConsulting.Internal;
 
 namespace JamesConsulting.Reflection
 {
@@ -30,8 +30,9 @@ namespace JamesConsulting.Reflection
         /// var invocation2 = methodInfo.ToInvocationString(3, "testing"); // cached template
         /// </code>
         /// </example>
-        public static string ToInvocationString([NotNull] this MethodInfo methodInfo, params object[] parameterValues)
+        public static string ToInvocationString(this MethodInfo methodInfo, params object[] parameterValues)
         {
+            Guard.NotNull(methodInfo);
             if (!MethodTemplates.ContainsKey(methodInfo)) MethodTemplates[methodInfo] = methodInfo.GetMethodTemplate();
             var (parameters, template) = MethodTemplates[methodInfo];
             return BindTemplate(template, parameters, parameterValues);
@@ -45,7 +46,7 @@ namespace JamesConsulting.Reflection
             return string.Format(template, parameters.Select((x, idx) => GetValue(x, parameterValues[idx])).ToArray());
         }
 
-        private static (ParameterInfo[] Parameters, string Template) GetMethodTemplate([NotNull] this MethodBase methodInfo)
+        private static (ParameterInfo[] Parameters, string Template) GetMethodTemplate(this MethodBase methodInfo)
         {
             var stringBuilder = new StringBuilder($"{methodInfo.DeclaringType!.FullName}.{methodInfo.Name}(");
             var parameterInfo = methodInfo.GetParameters();
