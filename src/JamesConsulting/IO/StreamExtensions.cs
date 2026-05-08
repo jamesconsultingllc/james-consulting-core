@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Text;
 using JamesConsulting.Internal;
 using Newtonsoft.Json;
 
@@ -36,13 +35,20 @@ public static class StreamExtensions
     public static bool IsExecutable(this Stream stream)
     {
         Guard.NotNull(stream);
-        var firstBytes = new byte[2];
+        Span<byte> firstBytes = stackalloc byte[2];
         var originalPosition = stream.Position;
         try
         {
             stream.Position = 0;
-            var read = stream.Read(firstBytes, 0, 2);
-            return read == 2 && Encoding.UTF8.GetString(firstBytes) == "MZ";
+            var total = 0;
+            while (total < 2)
+            {
+                var read = stream.Read(firstBytes.Slice(total));
+                if (read == 0) return false;
+                total += read;
+            }
+
+            return firstBytes[0] == (byte)'M' && firstBytes[1] == (byte)'Z';
         }
         finally
         {

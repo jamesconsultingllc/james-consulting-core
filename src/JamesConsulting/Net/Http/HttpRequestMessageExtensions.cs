@@ -36,7 +36,7 @@ public static class HttpRequestMessageExtensions
         Guard.NotNull(httpRequestMessage);
         Guard.NotNull(headers);
         if (httpRequestMessage.Headers.Any()) httpRequestMessage.Headers.Clear();
-        foreach (var headerKey in headers.Keys) httpRequestMessage.Headers.Add(headerKey, headers[headerKey]);
+        foreach (var header in headers) httpRequestMessage.Headers.Add(header.Key, header.Value);
         return httpRequestMessage;
     }
 }
