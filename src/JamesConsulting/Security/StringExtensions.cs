@@ -21,13 +21,13 @@ public static class StringExtensions
     /// var empty = string.Empty.ToSecureString(); // Length == 0
     /// </code>
     /// </example>
-    public static SecureString ToSecureString(this string str)
+    public static unsafe SecureString ToSecureString(this string str)
     {
-        var secure = new SecureString();
-        if (string.IsNullOrEmpty(str)) return secure;
+        if (string.IsNullOrEmpty(str)) return new SecureString();
 
-        foreach (var c in str) secure.AppendChar(c);
-        secure.MakeReadOnly();
-        return secure;
+        fixed (char* ptr = str)
+        {
+            return new SecureString(ptr, str.Length);
+        }
     }
 }
