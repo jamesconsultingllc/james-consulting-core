@@ -51,6 +51,16 @@ public static class MethodInfoExtensions
                 $"{methodInfo} must return Task<T>; got '{returnType}'.", nameof(methodInfo));
         }
 
+        // Reject open generic Task<T> (e.g. T is an unbound generic parameter from
+        // a generic method or open generic type). MakeGenericType / Activator
+        // would otherwise throw a less actionable reflection error.
+        if (returnType.ContainsGenericParameters)
+        {
+            throw new ArgumentException(
+                $"{methodInfo} return type '{returnType}' contains unbound generic parameters; only constructed Task<T> is supported.",
+                nameof(methodInfo));
+        }
+
         var resultType =
             Constants.TaskCompletionSourceType.MakeGenericType(returnType.GetGenericArguments());
         var taskSource = Activator.CreateInstance(resultType);

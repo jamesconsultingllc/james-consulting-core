@@ -41,4 +41,22 @@ public class MethodInfoExtensionsTests
     {
         Assert.Throws<ArgumentNullException>(() => default(MethodInfo)!.CreateTaskResult(default!));
     }
+
+    [Fact]
+    public void CreateTaskResultOpenGenericReturnTypeThrowsArgumentException()
+    {
+        // Open generic method definition: returns Task<T> where T is unbound.
+        var open = typeof(GenericMethodHost)
+            .GetMethod(nameof(GenericMethodHost.GenericAsync))!;
+        open.ContainsGenericParameters.Should().BeTrue();
+
+        var ex = Assert.Throws<ArgumentException>(() => open.CreateTaskResult(new MyClass { X = 1 }));
+        ex.ParamName.Should().Be("methodInfo");
+        ex.Message.Should().Contain("unbound generic parameters");
+    }
+
+    private sealed class GenericMethodHost
+    {
+        public Task<T> GenericAsync<T>() => Task.FromResult(default(T)!);
+    }
 }
