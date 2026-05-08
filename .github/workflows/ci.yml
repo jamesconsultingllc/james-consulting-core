@@ -309,7 +309,10 @@ jobs:
           fi
 
           # Tag commit must be on $STABLE_BRANCH so we cannot ship an untested SHA.
-          git fetch origin "$STABLE_BRANCH" --depth=0 >/dev/null 2>&1 || git fetch origin "$STABLE_BRANCH"
+          # checkout uses fetch-depth: 0, so the full history is already present;
+          # this fetch just refreshes the remote ref. Avoid invalid '--depth=0' —
+          # git rejects it, so any fallback would always run twice.
+          git fetch origin "$STABLE_BRANCH" >/dev/null 2>&1 || git fetch origin "$STABLE_BRANCH"
           if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$STABLE_BRANCH"; then
             echo "::error::Tag ${GITHUB_REF#refs/tags/} points at $GITHUB_SHA which is not on origin/$STABLE_BRANCH. Stable tags must be cut from $STABLE_BRANCH."
             exit 1

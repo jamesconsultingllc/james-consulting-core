@@ -66,9 +66,11 @@ public class TypeExtensionsTests
     [Fact]
     public void GetMethodInfoFromStringReturnsCachedMethodOnSubsequentRequests()
     {
-        var result1 = GetType().GetMethodInfoFromString(nameof(IsConcreteClassInterfaceTypeReturnsFalse));
-        var result2 = GetType().GetMethodInfoFromString(nameof(IsConcreteClassInterfaceTypeReturnsFalse));
-        result1.Should().BeSameAs(result2);
+        var signature = InstanceType.GetMethods().First(x => x.Name == "GetClassById").ToString()!;
+        var result1 = InstanceType.GetMethodInfoFromString(signature);
+        var result2 = InstanceType.GetMethodInfoFromString(signature);
+        result1.Should().NotBeNull();
+        result2.Should().BeSameAs(result1);
     }
 
     [Fact]
