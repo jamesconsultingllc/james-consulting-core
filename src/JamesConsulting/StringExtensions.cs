@@ -82,6 +82,11 @@ public static class StringExtensions
     {
         Guard.NotNull(argument);
         Guard.StrictlyPositive(length);
-        return argument.Length == 0 ? string.Empty : argument.Substring(0, length);
+        if (argument.Length == 0) return string.Empty;
+        // length is treated as the *maximum* number of characters to keep: when the input
+        // is already shorter than length the input is returned unchanged. This matches the
+        // <see cref="string.Substring(int,int)"/>-free semantics callers expect from a
+        // method named "Truncate" and avoids ArgumentOutOfRangeException for short inputs.
+        return length >= argument.Length ? argument : argument.Substring(0, length);
     }
 }

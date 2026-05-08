@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Text;
 using JamesConsulting.Internal;
 using Newtonsoft.Json;
 
@@ -115,7 +116,13 @@ public static class StreamExtensions
     public static T? Deserialize<T>(this Stream stream)
     {
         Guard.NotNull(stream);
-        using var sr = new StreamReader(stream);
+        // leaveOpen=true keeps the caller-provided stream alive after the StreamReader and
+        // JsonTextReader are disposed. The default StreamReader behavior would close the
+        // underlying stream, surprising callers that expected to reuse or dispose it
+        // themselves. We pass an explicit encoding (UTF-8 without BOM, per System.Text.Json
+        // default) and use the overload available on every supported TFM.
+        using var sr = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024, leaveOpen: true);
         using JsonReader reader = new JsonTextReader(sr);
         var serializer = new JsonSerializer();
         return serializer.Deserialize<T>(reader);

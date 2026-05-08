@@ -87,9 +87,14 @@ public static class ObjectExtensions
     /// Serializes an object to JSON and writes it to the provided stream, resetting the position to 0 after writing.
     /// </summary>
     /// <param name="obj">The object to serialize.</param>
-    /// <param name="stream">The writable target stream.</param>
+    /// <param name="stream">The writable, seekable target stream.</param>
     /// <returns>The same stream instance, positioned at the start.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="obj" /> or <paramref name="stream" /> is <c>null</c>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="stream" /> is not writable (<see cref="Stream.CanWrite" /> is <c>false</c>) or not seekable
+    /// (<see cref="Stream.CanSeek" /> is <c>false</c>). Both capabilities are required: the method writes the JSON
+    /// payload and then resets <see cref="Stream.Position" /> to 0 so callers can immediately read the result back.
+    /// </exception>
     /// <example>
     /// Serialize to stream.
     /// <code>

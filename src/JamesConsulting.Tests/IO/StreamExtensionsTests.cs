@@ -20,6 +20,22 @@ public class StreamExtensionsTests
         newTest.Should().Be(test);
     }
 
+    /// <summary>
+    /// <see cref="StreamExtensions.Deserialize{T}"/> uses an internal
+    /// <see cref="StreamReader"/>; the default StreamReader behavior is to dispose the
+    /// underlying stream when itself disposed. This regression test pins the
+    /// leaveOpen=true contract so callers can keep using their stream after the call.
+    /// </summary>
+    [Fact]
+    public void DeserializeLeavesCallerStreamOpen()
+    {
+        var test = new MyClass("Test", 3);
+        using var ms = (MemoryStream)test.SerializeToJsonStream(new MemoryStream());
+        _ = ms.Deserialize<MyClass>();
+        // CanRead would be false on a disposed MemoryStream.
+        ms.CanRead.Should().BeTrue("the caller-provided stream must remain open after Deserialize returns");
+    }
+
     [Fact]
     public void IsExecutableExeStream()
     {

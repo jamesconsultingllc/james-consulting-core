@@ -100,4 +100,19 @@ public class StringExtensionsTests
     {
         Assert.Throws<ArgumentNullException>(() => default(string)!.Truncate(0));
     }
+
+    /// <summary>
+    /// When length exceeds the input's length, Truncate must return the input unchanged.
+    /// Previously this surface threw <see cref="ArgumentOutOfRangeException"/> from
+    /// <see cref="string.Substring(int,int)"/>, which contradicted the documented
+    /// "maximum number of characters to keep" semantics.
+    /// </summary>
+    [Theory]
+    [InlineData("abc", 5, "abc")]
+    [InlineData("abc", 3, "abc")]
+    [InlineData("abc", 2, "ab")]
+    public void TruncateLengthGreaterThanOrEqualToInputReturnsInput(string input, int length, string expected)
+    {
+        input.Truncate(length).Should().Be(expected);
+    }
 }
