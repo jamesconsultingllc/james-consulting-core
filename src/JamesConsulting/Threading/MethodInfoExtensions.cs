@@ -13,12 +13,18 @@ public static class MethodInfoExtensions
     private const string Task = "Task";
 
     /// <summary>
-    /// Creates a <see cref="System.Threading.Tasks.Task" /> (or <see cref="System.Threading.Tasks.Task{TResult}" />)
-    /// representing the supplied result for the reflected method's generic return type.
+    /// Creates a completed <see cref="System.Threading.Tasks.Task{TResult}" /> wrapping
+    /// <paramref name="results" /> for a reflected method whose return type is a constructed
+    /// <see cref="System.Threading.Tasks.Task{TResult}" />.
     /// </summary>
-    /// <param name="methodInfo">The reflected method with a generic Task return type.</param>
-    /// <param name="results">The dynamic results to set on the created task source.</param>
-    /// <returns>The created task instance containing the result.</returns>
+    /// <remarks>
+    /// Only constructed <see cref="System.Threading.Tasks.Task{TResult}" /> return types are
+    /// supported. <see cref="System.Threading.Tasks.Task" /> (non-generic) and <c>void</c> are
+    /// rejected with <see cref="ArgumentException" /> because there is no result type to bind.
+    /// </remarks>
+    /// <param name="methodInfo">The reflected method whose return type must be <c>Task&lt;T&gt;</c>.</param>
+    /// <param name="results">The result value to set on the created <c>TaskCompletionSource&lt;T&gt;</c>.</param>
+    /// <returns>The completed <c>Task&lt;T&gt;</c> instance carrying <paramref name="results" />.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="methodInfo" /> is <c>null</c>.</exception>
     /// <exception cref="ArgumentException">
     /// The method's return type is not a constructed <see cref="System.Threading.Tasks.Task{TResult}" />

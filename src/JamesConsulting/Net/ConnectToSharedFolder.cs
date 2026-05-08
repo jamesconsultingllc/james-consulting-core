@@ -18,9 +18,15 @@ public sealed class ConnectToSharedFolder : IDisposable
     /// <summary>
     /// Creates a new <see cref="ConnectToSharedFolder" /> instance.
     /// </summary>
-    /// <param name="networkName">UNC path of the shared network folder.</param>
-    /// <param name="credentials">Credentials used for impersonation.</param>
-    /// <exception cref="ArgumentException">The credential username is null or whitespace.</exception>
+    /// <param name="networkName">UNC path of the shared network folder. Must be non-null and non-empty.</param>
+    /// <param name="credentials">Credentials used for impersonation. Must have a non-empty <see cref="NetworkCredential.UserName" />.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="networkName" /> or <paramref name="credentials" /> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="networkName" /> is empty or whitespace, or
+    /// <paramref name="credentials" /><c>.UserName</c> is null or whitespace.
+    /// </exception>
     /// <example>
     /// Construction and usage.
     /// <code>
