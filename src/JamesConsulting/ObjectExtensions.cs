@@ -56,7 +56,7 @@ public static class ObjectExtensions
     /// </example>
     public static T Mask<T>(this T data, params string[] propertiesToMask)
     {
-        Guard.NotNull(data as object, nameof(data));
+        if (data is null) throw new ArgumentNullException(nameof(data));
         Guard.NotNullOrEmpty(propertiesToMask);
         var jo = JObject.FromObject(data!);
         foreach (var propertyToMask in propertiesToMask)

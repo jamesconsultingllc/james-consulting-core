@@ -17,6 +17,8 @@ namespace JamesConsulting.Internal
     /// </summary>
     internal static class Guard
     {
+        private const string ValueCannotBeEmpty = "Value cannot be empty.";
+
         /// <summary>Throws <see cref="ArgumentNullException" /> when <paramref name="value" /> is <c>null</c>.</summary>
         public static void NotNull<T>(
             [NotNull] T? value,
@@ -38,7 +40,7 @@ namespace JamesConsulting.Internal
             string value,
             [CallerArgumentExpression("value")] string? name = null)
         {
-            if (value.Length == 0) throw new ArgumentException("Value cannot be empty.", name);
+            if (value.Length == 0) throw new ArgumentException(ValueCannotBeEmpty, name);
         }
 
         /// <summary>
@@ -49,7 +51,7 @@ namespace JamesConsulting.Internal
             T[] value,
             [CallerArgumentExpression("value")] string? name = null)
         {
-            if (value.Length == 0) throw new ArgumentException("Value cannot be empty.", name);
+            if (value.Length == 0) throw new ArgumentException(ValueCannotBeEmpty, name);
         }
 
         /// <summary>Throws <see cref="ArgumentNullException" /> for <c>null</c>, <see cref="ArgumentException" /> for empty.</summary>
@@ -58,7 +60,7 @@ namespace JamesConsulting.Internal
             [CallerArgumentExpression("value")] string? name = null)
         {
             NotNull(value, name);
-            if (value.Length == 0) throw new ArgumentException("Value cannot be empty.", name);
+            if (value.Length == 0) throw new ArgumentException(ValueCannotBeEmpty, name);
         }
 
         /// <summary>Throws <see cref="ArgumentNullException" /> for <c>null</c>, <see cref="ArgumentException" /> for empty array.</summary>
@@ -67,7 +69,7 @@ namespace JamesConsulting.Internal
             [CallerArgumentExpression("value")] string? name = null)
         {
             NotNull(value, name);
-            if (value.Length == 0) throw new ArgumentException("Value cannot be empty.", name);
+            if (value.Length == 0) throw new ArgumentException(ValueCannotBeEmpty, name);
         }
 
         /// <summary>Matches Metalama <c>[Required]</c>: throws on null or whitespace.</summary>

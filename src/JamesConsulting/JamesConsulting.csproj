@@ -14,7 +14,6 @@
         <Nullable>enable</Nullable>
         <TargetFrameworks>netstandard2.0;netstandard2.1;net9.0;net10.0</TargetFrameworks>
         <CodeAnalysisRuleSet>..\..\.sonarlint\james-consulting-corecsharp.ruleset</CodeAnalysisRuleSet>
-        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
