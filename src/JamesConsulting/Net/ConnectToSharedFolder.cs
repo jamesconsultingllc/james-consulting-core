@@ -59,22 +59,40 @@ public sealed class ConnectToSharedFolder : IDisposable
     [ExcludeFromCodeCoverage]
     public void Dispose()
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            WNetCancelConnection2(networkName, 0, true);
-        }
+        Dispose(true);
         GC.SuppressFinalize(this);
     }
 
     /// <summary>
-    /// Finalizer releasing the network connection.
+    /// Finalizer releasing the network connection. Shielded so any P/Invoke
+    /// failure cannot escape the finalizer thread and crash the process.
     /// </summary>
     [ExcludeFromCodeCoverage]
     ~ConnectToSharedFolder()
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        Dispose(false);
+    }
+
+    [ExcludeFromCodeCoverage]
+    private void Dispose(bool disposing)
+    {
+        // The constructor only assigns networkName after argument validation, so a
+        // partially-initialized instance (ctor threw) leaves it null and we must
+        // skip the native call. The finalizer must also never throw.
+        if (string.IsNullOrEmpty(networkName)) return;
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
+        try
         {
             WNetCancelConnection2(networkName, 0, true);
+        }
+        catch
+        {
+            // Swallow all exceptions from native cleanup — failing to disconnect
+            // here is non-fatal, and propagating from a finalizer would terminate
+            // the process. Disposing path also swallows by symmetry; explicit
+            // disconnection should use Connect()/Dispose() flow with surfaced
+            // errors via the Connect() Win32Exception path.
+            _ = disposing;
         }
     }
 
