@@ -1,69 +1,61 @@
-﻿//  ----------------------------------------------------------------------------------------------------------------------
-//  <copyright file="DbConnectionStringBuilderExtensionTests.cs" company="James Consulting LLC">
-//    Copyright (c) All Rights Reserved
-//  </copyright>
-//  <author>Rudy James</author>
-//  ----------------------------------------------------------------------------------------------------------------------
-
-using System;
+﻿using System;
 using System.Data.Common;
 using FluentAssertions;
 using JamesConsulting.Data.Common;
 using Xunit;
 
-namespace JamesConsulting.Tests.Data.Common
+namespace JamesConsulting.Tests.Data.Common;
+
+/// <summary>
+/// Unit tests for the <see cref="DbConnectionStringBuilderExtensions" /> class.
+/// </summary>
+public class DbConnectionStringBuilderExtensionTests
 {
     /// <summary>
-    /// Unit tests for the <see cref="DbConnectionStringBuilderExtensions"/> class.
+    /// Removes the specified keys from the connection string.
     /// </summary>
-    public class DbConnectionStringBuilderExtensionTests
+    [Fact]
+    public void RemoveKeysFromConnectionString()
     {
-        /// <summary>
-        /// Removes the specified keys from the connection string.
-        /// </summary>
-        [Fact]
-        public void RemoveKeysFromConnectionString()
+        var dbConnectionStringBuilder = new DbConnectionStringBuilder
         {
-            var dbConnectionStringBuilder = new DbConnectionStringBuilder
-            {
-                ConnectionString = "Server=myServerAddress;Database=myDataBase;User Id=myUsername;Password=myPassword;"
-            };
+            ConnectionString = "Server=myServerAddress;Database=myDataBase;User Id=myUsername;Password=myPassword;"
+        };
 
-            dbConnectionStringBuilder.ConnectionString.Contains("myPassword").Should().BeTrue();
+        dbConnectionStringBuilder.ConnectionString.Contains("myPassword").Should().BeTrue();
 
-            dbConnectionStringBuilder.RemoveKeys("Password");
+        dbConnectionStringBuilder.RemoveKeys("Password");
 
-            dbConnectionStringBuilder.ConnectionString.Contains("myPassword").Should().BeFalse();
-        }
+        dbConnectionStringBuilder.ConnectionString.Contains("myPassword").Should().BeFalse();
+    }
 
-        /// <summary>
-        /// Throws an <see cref="ArgumentException"/> when the keys parameter is empty.
-        /// </summary>
-        [Fact]
-        public void RemoveKeysThrowsArgumentExceptionWhenKeysIsEmpty()
-        {
-            var exception = Assert.Throws<ArgumentException>(() => new DbConnectionStringBuilder().RemoveKeys([]));
-            exception.ParamName.Should().Be("keys");
-        }
+    /// <summary>
+    /// Throws an <see cref="ArgumentException" /> when the keys parameter is empty.
+    /// </summary>
+    [Fact]
+    public void RemoveKeysThrowsArgumentExceptionWhenKeysIsEmpty()
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new DbConnectionStringBuilder().RemoveKeys());
+        exception.ParamName.Should().Be("keys");
+    }
 
-        /// <summary>
-        /// Throws an <see cref="ArgumentNullException"/> when the <see cref="DbConnectionStringBuilder"/> is null.
-        /// </summary>
-        [Fact]
-        public void RemoveKeysThrowsArgumentNullExceptionWhenDbConnectionStringBuilderIsNull()
-        {
-            var exception = Assert.Throws<ArgumentNullException>(() => default(DbConnectionStringBuilder)!.RemoveKeys());
-            exception.ParamName.Should().Be("connectionStringBuilder");
-        }
+    /// <summary>
+    /// Throws an <see cref="ArgumentNullException" /> when the <see cref="DbConnectionStringBuilder" /> is null.
+    /// </summary>
+    [Fact]
+    public void RemoveKeysThrowsArgumentNullExceptionWhenDbConnectionStringBuilderIsNull()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(() => default(DbConnectionStringBuilder)!.RemoveKeys());
+        exception.ParamName.Should().Be("connectionStringBuilder");
+    }
 
-        /// <summary>
-        /// Throws an <see cref="ArgumentNullException"/> when the keys parameter is null.
-        /// </summary>
-        [Fact]
-        public void RemoveKeysThrowsArgumentNullExceptionWhenKeysIsNull()
-        {
-            var exception = Assert.Throws<ArgumentNullException>(() => new DbConnectionStringBuilder().RemoveKeys(null!));
-            exception.ParamName.Should().Be("keys");
-        }
+    /// <summary>
+    /// Throws an <see cref="ArgumentNullException" /> when the keys parameter is null.
+    /// </summary>
+    [Fact]
+    public void RemoveKeysThrowsArgumentNullExceptionWhenKeysIsNull()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(() => new DbConnectionStringBuilder().RemoveKeys(null!));
+        exception.ParamName.Should().Be("keys");
     }
 }

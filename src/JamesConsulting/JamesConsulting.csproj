@@ -1,45 +1,29 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <PackageId>JamesConsulting</PackageId>
-    <Authors>Rudy James</Authors>
-    <Company>James Consulting LLC</Company>
-    <Product>James Consulting Core Library</Product>
-    <Copyright>Copyright (c) 2020 - 2025 All Rights Reserved</Copyright>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/jamesconsultingllc/JamesConsulting</RepositoryUrl>
-    <ProjectGuid>9F232F91-5328-4EE7-BC83-AB21CBA9C18B</ProjectGuid>
-    <LangVersion>default</LangVersion>
-    <Nullable>enable</Nullable>
-    <TargetFrameworks>net462;net6.0;net7.0;net8.0;net9.0;net10.0;netstandard2.0;netstandard2.1</TargetFrameworks>
-    <CodeAnalysisRuleSet>..\..\.sonarlint\james-consulting-corecsharp.ruleset</CodeAnalysisRuleSet>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <DocumentationFile>bin\Debug\JamesConsulting.xml</DocumentationFile>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-  </PropertyGroup>
-  <PropertyGroup>
-    <VersionMajor>2</VersionMajor>
-    <VersionMinor>0</VersionMinor>
-    <VersionBuild>0</VersionBuild>
-  </PropertyGroup>
-  <PropertyGroup>
-    <VersionPrefix Condition=" '$(BUILD_BUILDNUMBER)' == '' ">$(VersionMajor).$(VersionMinor).$(VersionBuild)-local</VersionPrefix>
-    <VersionPrefix Condition=" '$(BUILD_BUILDNUMBER)' != '' And '$(Configuration)' == 'Debug'">$(VersionMajor).$(VersionMinor).$(VersionBuild)-$(BUILD_BUILDNUMBER)-preview</VersionPrefix>
-    <VersionPrefix Condition=" '$(Configuration)' != 'Debug'">$(VersionMajor).$(VersionMinor).$(VersionBuild)</VersionPrefix>
-  </PropertyGroup>
-  <ItemGroup>
-    <AdditionalFiles Include="..\..\.sonarlint\james-consulting-core\CSharp\SonarLint.xml" Link="SonarLint.xml" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Metalama.Framework" Version="2025.1.16" />
-    <PackageReference Include="Metalama.Migration" Version="2025.1.16" />
-    <PackageReference Include="Metalama.Patterns.Contracts" Version="2025.1.16" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="Utf8Json" Version="1.3.7" />
-  </ItemGroup>
+
+    <PropertyGroup>
+        <PackageId>JamesConsulting</PackageId>
+        <Product>James Consulting Core Library</Product>
+        <ProjectGuid>9F232F91-5328-4EE7-BC83-AB21CBA9C18B</ProjectGuid>
+        <LangVersion>default</LangVersion>
+        <TargetFrameworks>netstandard2.0;netstandard2.1;net9.0;net10.0</TargetFrameworks>
+        <CodeAnalysisRuleSet>..\..\.sonarlint\james-consulting-corecsharp.ruleset</CodeAnalysisRuleSet>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <EnablePackageValidation>true</EnablePackageValidation>
+        <DebugType>embedded</DebugType>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <AdditionalFiles Include="..\..\.sonarlint\james-consulting-core\CSharp\SonarLint.xml" Link="SonarLint.xml"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+        <PackageReference Include="Utf8Json" Version="1.3.7" />
+    </ItemGroup>
+
 </Project>

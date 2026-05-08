@@ -1,25 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <ProjectGuid>2D54BF37-CC9F-4082-8A9F-682891B64AA4</ProjectGuid>
-    <IsPackable>false</IsPackable>
-    <LangVersion>default</LangVersion>
-    <Nullable>enable</Nullable>
-    <!-- Added net10.0 to test latest framework -->
-    <TargetFrameworks>net462;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="FluentAssertions" Version="8.8.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="Moq" Version="4.20.72" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\JamesConsulting\JamesConsulting.csproj" />
-  </ItemGroup>
+    <PropertyGroup>
+        <ProjectGuid>2D54BF37-CC9F-4082-8A9F-682891B64AA4</ProjectGuid>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+        <LangVersion>default</LangVersion>
+        <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1"/>
+        <PackageReference Include="FluentAssertions" Version="8.8.0"/>
+        <PackageReference Include="NSubstitute" Version="5.3.0"/>
+        <PackageReference Include="xunit" Version="2.9.3"/>
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all"/>
+        <PackageReference Remove="Nerdbank.GitVersioning"/>
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\JamesConsulting\JamesConsulting.csproj"/>
+    </ItemGroup>
 </Project>

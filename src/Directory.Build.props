@@ -1,0 +1,40 @@
+<Project>
+    <PropertyGroup>
+        <!-- Solution-wide metadata. Per-project metadata (PackageId, Description, etc.)
+             still lives in each .csproj. -->
+        <Authors>Rudy James</Authors>
+        <Company>James Consulting LLC</Company>
+        <!-- Copyright year range. When start year == current year, only one year is emitted
+             (avoids degenerate ranges like "2026 - 2026"). -->
+        <_CopyrightStartYear>2019</_CopyrightStartYear>
+        <_CopyrightCurrentYear>$([System.DateTime]::Now.Year)</_CopyrightCurrentYear>
+        <_CopyrightYears Condition="'$(_CopyrightStartYear)' == '$(_CopyrightCurrentYear)'">$(_CopyrightStartYear)</_CopyrightYears>
+        <_CopyrightYears Condition="'$(_CopyrightYears)' == ''">$(_CopyrightStartYear) - $(_CopyrightCurrentYear)</_CopyrightYears>
+        <Copyright>Copyright (c) $(_CopyrightYears) James Consulting LLC. All Rights Reserved.</Copyright>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <RepositoryUrl>https://github.com/jamesconsultingllc/james-consulting-core</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+
+        <!-- Build behavior -->
+        <Nullable>enable</Nullable>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <!-- Reproducible builds: identical sources -> bit-identical assemblies. -->
+        <Deterministic>true</Deterministic>
+        <!-- Embed sources that aren't tracked by git into the PDB so SourceLink
+             can step into generated/derived files. -->
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <!--
+            Only enable on CI. Locally this rewrites source paths and disables
+            timestamp-based optimizations, slowing inner-loop builds and
+            confusing IDE debugging. GitHub Actions sets CI=true automatically.
+        -->
+        <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Pin a specific Nerdbank.GitVersioning version; update when you choose -->
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.9.50" PrivateAssets="all"/>
+        <!-- Optional: SourceLink for better debugging and provenance -->
+        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
+    </ItemGroup>
+</Project>
