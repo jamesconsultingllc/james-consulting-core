@@ -16,9 +16,7 @@
         </Setting>
         <Setting>
             <Key>sonar.cs.fxcop.fxCopCmdPath</Key>
-            <Value>C:/Program Files (x86)/Microsoft Visual Studio 12.0/Team Tools/Static Analysis
-                Tools/FxCop/FxCopCmd.exe
-            </Value>
+            <Value>C:/Program Files (x86)/Microsoft Visual Studio 12.0/Team Tools/Static Analysis Tools/FxCop/FxCopCmd.exe</Value>
         </Setting>
         <Setting>
             <Key>sonar.cs.fxcop.timeoutMinutes</Key>
