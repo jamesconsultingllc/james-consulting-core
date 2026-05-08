@@ -33,4 +33,21 @@ public class ByteArrayExtensionsTests
     {
         "Test".GetBytes().GetString().Should().Be("Test");
     }
+
+    /// <summary>
+    /// UTF-16 requires exactly two bytes per <see cref="char"/>. Odd-length byte arrays
+    /// cannot be valid UTF-16 representations and must be rejected with a clear
+    /// <see cref="ArgumentException"/> instead of a low-level
+    /// <see cref="ArgumentException"/> from <see cref="Buffer.BlockCopy"/>.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(7)]
+    public void GetStringOddLengthArrayThrowsArgumentException(int length)
+    {
+        var bytes = new byte[length];
+        var ex = Assert.Throws<ArgumentException>(() => bytes.GetString());
+        ex.ParamName.Should().Be("bytes");
+    }
 }
