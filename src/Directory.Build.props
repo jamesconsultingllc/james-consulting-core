@@ -12,7 +12,12 @@
         <!-- Build behavior -->
         <Nullable>enable</Nullable>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+        <!--
+            Only enable on CI. Locally this rewrites source paths and disables
+            timestamp-based optimizations, slowing inner-loop builds and
+            confusing IDE debugging. GitHub Actions sets CI=true automatically.
+        -->
+        <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     </PropertyGroup>
 
     <ItemGroup>

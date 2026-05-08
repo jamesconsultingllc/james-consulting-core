@@ -10,7 +10,7 @@ public static class StringExtensions
     /// <summary>
     /// Creates a <see cref="SecureString" /> containing the characters of the input string.
     /// </summary>
-    /// <param name="str">The source string.</param>
+    /// <param name="str">The source string. May be <see langword="null"/>.</param>
     /// <returns>A new <see cref="SecureString" /> instance; empty if the input is null or empty.</returns>
     /// <example>
     /// Create a secure string.
@@ -21,7 +21,7 @@ public static class StringExtensions
     /// var empty = string.Empty.ToSecureString(); // Length == 0
     /// </code>
     /// </example>
-    public static unsafe SecureString ToSecureString(this string str)
+    public static unsafe SecureString ToSecureString(this string? str)
     {
         if (string.IsNullOrEmpty(str)) return new SecureString();
 
