@@ -52,7 +52,6 @@ public class StreamExtensionsTests
     [Fact]
     public void IsExecutableThrowsArgumentExceptionWhenStreamIsNotReadable()
     {
-        using var ms = new MemoryStream(new byte[] { (byte)'M', (byte)'Z' }, writable: false);
         using var writeOnly = new WriteOnlyStream();
         var ex = Assert.Throws<ArgumentException>(() => writeOnly.IsExecutable());
         ex.ParamName.Should().Be("stream");

@@ -165,11 +165,11 @@ public static class StringExtensions
 
         var effectiveAlgorithm = algorithm ?? HashAlgorithmName.SHA256;
 #if NET8_0_OR_GREATER
-            // Static PBKDF2 helper for newer frameworks.
-            var bytes = Encoding.UTF8.GetBytes(target);
-            Span<byte> derived = stackalloc byte[32];
-            Rfc2898DeriveBytes.Pbkdf2(bytes, salt, derived, numberOfRounds, effectiveAlgorithm);
-            return Convert.ToBase64String(derived);
+        // Static PBKDF2 helper for newer frameworks.
+        var bytes = Encoding.UTF8.GetBytes(target);
+        Span<byte> derived = stackalloc byte[32];
+        Rfc2898DeriveBytes.Pbkdf2(bytes, salt, derived, numberOfRounds, effectiveAlgorithm);
+        return Convert.ToBase64String(derived);
 #elif NETSTANDARD2_0
         if (algorithm.HasValue && algorithm.Value != HashAlgorithmName.SHA1)
             throw new PlatformNotSupportedException(
@@ -179,10 +179,10 @@ public static class StringExtensions
         var hash = rfc2898DeriveBytes.GetBytes(32);
         return Convert.ToBase64String(hash);
 #else
-            using var rfc2898DeriveBytes =
- new Rfc2898DeriveBytes(Encoding.UTF8.GetBytes(target), salt, numberOfRounds, effectiveAlgorithm);
-            var hash = rfc2898DeriveBytes.GetBytes(32);
-            return Convert.ToBase64String(hash);
+        using var rfc2898DeriveBytes = new Rfc2898DeriveBytes(
+            Encoding.UTF8.GetBytes(target), salt, numberOfRounds, effectiveAlgorithm);
+        var hash = rfc2898DeriveBytes.GetBytes(32);
+        return Convert.ToBase64String(hash);
 #endif
     }
 }
