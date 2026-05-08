@@ -1,68 +1,57 @@
-﻿//  ----------------------------------------------------------------------------------------------------------------------
-//  <copyright file="EnumExtensionsTests.cs" company="James Consulting LLC">
-//    Copyright © James Consulting LLC. All rights reserved.
-//  </copyright>
-//  <author>Rudy James</author>
-//  <summary>
-//  
-//  </summary>
-//  ----------------------------------------------------------------------------------------------------------------------
-
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using FluentAssertions;
 using Xunit;
 
-namespace JamesConsulting.Tests
+namespace JamesConsulting.Tests;
+
+/// <summary>
+/// The enum extensions tests.
+/// </summary>
+public class EnumExtensionsTests
 {
     /// <summary>
-    ///     The enum extensions tests.
+    /// The get description_ enum does not have description attribute.
     /// </summary>
-    public class EnumExtensionsTests
+    [Fact]
+    public void GetDescription_EnumDoesNotHaveDescriptionAttribute()
+    {
+        var description = MyOptions.With.GetDescription();
+        description.Should().BeEquivalentTo("Testing");
+    }
+
+    /// <summary>
+    /// The get description_ enum has description attribute.
+    /// </summary>
+    [Fact]
+    public void GetDescription_EnumHasDescriptionAttribute()
+    {
+        var description = MyOptions.Without.GetDescription();
+        description.Should().BeEquivalentTo("Without");
+    }
+
+    /// <summary>
+    /// The get description_ enum has description attribute.
+    /// </summary>
+    [Fact]
+    public void GetDescription_InvalidEnum_ThrowsInvalidOperationException()
+    {
+        var description = ((MyOptions)3).GetDescription();
+        description.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The my enum.
+    /// </summary>
+    private enum MyOptions
     {
         /// <summary>
-        ///     The my enum.
+        /// The with.
         /// </summary>
-        private enum MyOptions
-        {
-            /// <summary>
-            ///     The with.
-            /// </summary>
-            [Description("Testing")] With,
-
-            /// <summary>
-            ///     The without.
-            /// </summary>
-            Without
-        }
+        [Description("Testing")] With,
 
         /// <summary>
-        ///     The get description_ enum does not have description attribute.
+        /// The without.
         /// </summary>
-        [Fact]
-        public void GetDescription_EnumDoesNotHaveDescriptionAttribute()
-        {
-            var description = MyOptions.With.GetDescription();
-            description.Should().BeEquivalentTo("Testing");
-        }
-
-        /// <summary>
-        ///     The get description_ enum has description attribute.
-        /// </summary>
-        [Fact]
-        public void GetDescription_EnumHasDescriptionAttribute()
-        {
-            var description = MyOptions.Without.GetDescription();
-            description.Should().BeEquivalentTo("Without");
-        }
-
-        /// <summary>
-        ///     The get description_ enum has description attribute.
-        /// </summary>
-        [Fact]
-        public void GetDescription_InvalidEnum_ThrowsInvalidOperationException()
-        {
-            var description = EnumExtensions.GetDescription((MyOptions)3);
-            description.Should().BeNull();
-        }
+        Without
     }
 }

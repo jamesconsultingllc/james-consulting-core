@@ -1,12 +1,12 @@
 <Project>
-  <PropertyGroup>
-    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-  </PropertyGroup>
+    <PropertyGroup>
+        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <!-- Pin a specific Nerdbank.GitVersioning version; update when you choose -->
-    <PackageReference Include="Nerdbank.GitVersioning" Version="3.9.50" PrivateAssets="all" />
-    <!-- Optional: SourceLink for better debugging and provenance -->
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
-  </ItemGroup>
+    <ItemGroup>
+        <!-- Pin a specific Nerdbank.GitVersioning version; update when you choose -->
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.9.50" PrivateAssets="all"/>
+        <!-- Optional: SourceLink for better debugging and provenance -->
+        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
+    </ItemGroup>
 </Project>
