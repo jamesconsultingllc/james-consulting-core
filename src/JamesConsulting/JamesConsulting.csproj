@@ -16,10 +16,6 @@
         <DebugType>embedded</DebugType>
     </PropertyGroup>
 
-    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-        <DocumentationFile>bin\Debug\JamesConsulting.xml</DocumentationFile>
-    </PropertyGroup>
-
     <ItemGroup>
         <AdditionalFiles Include="..\..\.sonarlint\james-consulting-core\CSharp\SonarLint.xml" Link="SonarLint.xml"/>
     </ItemGroup>

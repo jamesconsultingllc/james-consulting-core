@@ -80,8 +80,6 @@ jobs:
             /d:sonar.coverage.exclusions="**/*Tests/**,**/*.Tests/**"
 
       - name: Build
-        env:
-          CI: 'true'  # activates ContinuousIntegrationBuild for deterministic source paths
         run: dotnet build "$SOLUTION" --configuration Release --no-restore
 
       - name: Test (with coverage)
@@ -113,7 +111,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nupkg-${{ github.run_number }}
-          path: ./artifacts/*.nupkg
+          path: |
+            ./artifacts/*.nupkg
+            ./artifacts/*.snupkg
           retention-days: 14
 
       - name: Upload test results
@@ -225,16 +225,26 @@ jobs:
       - name: Push to nuget.org
         shell: bash
         run: |
-          dotnet nuget push ./artifacts/*.nupkg \
+          dotnet nuget push "./artifacts/*.nupkg" \
             --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
+          # Push symbol packages alongside; --skip-duplicate keeps the
+          # job idempotent across retries.
+          if compgen -G "./artifacts/*.snupkg" > /dev/null; then
+            dotnet nuget push "./artifacts/*.snupkg" \
+              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          fi
 
       - name: Upload signed package artifact
         uses: actions/upload-artifact@v4
         with:
           name: published-${{ steps.version.outputs.version }}
-          path: ./artifacts/*.nupkg
+          path: |
+            ./artifacts/*.nupkg
+            ./artifacts/*.snupkg
           retention-days: 90
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -349,16 +359,26 @@ jobs:
       - name: Push to nuget.org
         shell: bash
         run: |
-          dotnet nuget push ./artifacts/*.nupkg \
+          dotnet nuget push "./artifacts/*.nupkg" \
             --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
+          # Push symbol packages alongside; --skip-duplicate keeps the
+          # job idempotent across retries.
+          if compgen -G "./artifacts/*.snupkg" > /dev/null; then
+            dotnet nuget push "./artifacts/*.snupkg" \
+              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          fi
 
       - name: Upload signed package artifact
         uses: actions/upload-artifact@v4
         with:
           name: published-${{ steps.version.outputs.version }}
-          path: ./artifacts/*.nupkg
+          path: |
+            ./artifacts/*.nupkg
+            ./artifacts/*.snupkg
           retention-days: 90
 
       - name: Create GitHub Release
@@ -366,4 +386,6 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           generate_release_notes: true
-          files: ./artifacts/*.nupkg
+          files: |
+            ./artifacts/*.nupkg
+            ./artifacts/*.snupkg
