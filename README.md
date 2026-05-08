@@ -36,7 +36,7 @@ dotnet add package JamesConsulting
 |---|---|
 | `JamesConsulting` | `StringExtensions`, `ByteArrayExtensions`, `EnumExtensions`, `ObjectExtensions` (mask/redact, deep-clone, JSON helpers), `Constants`, `MimeTypes`, `MethodTypeOptions` |
 | `JamesConsulting.Cryptography` | Hashing/encoding helpers on top of `string` |
-| `JamesConsulting.Hosting` | `IHostExtensions`, `IHostInitializer` / `IHostInitializerAsync` — run async one-shot startup work inside `IHost` before `RunAsync()` |
+| `JamesConsulting.Hosting` | `HostExtensions`, `IHostInitializer` / `IHostInitializerAsync` — run async one-shot startup work inside `IHost` before `RunAsync()` |
 | `JamesConsulting.IO` | `StreamExtensions` (read-to-end, copy with progress, etc.) |
 | `JamesConsulting.Net` | `ConnectToSharedFolder` — UNC/SMB credential impersonation (Windows-only at runtime; safe-no-op on macOS/Linux) |
 | `JamesConsulting.Reflection` | `TypeExtensions` (default value resolution, async-method detection), `MethodInfoExtensions` |

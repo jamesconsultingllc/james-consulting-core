@@ -11,7 +11,7 @@ namespace JamesConsulting.Reflection;
 /// </summary>
 public static class TypeExtensions
 {
-    private static readonly ConcurrentDictionary<string, MethodInfo> Methods = new();
+    private static readonly ConcurrentDictionary<(Type Type, string Signature), MethodInfo> Methods = new();
 
     /// <summary>
     /// Resolves a cached <see cref="MethodInfo" /> from its <c>MemberInfo.ToString()</c> string representation.
@@ -32,7 +32,8 @@ public static class TypeExtensions
     {
         Guard.NotNull(type);
         Guard.Required(method);
-        if (Methods.TryGetValue(method, out var s)) return s;
+        var key = (type, method);
+        if (Methods.TryGetValue(key, out var s)) return s;
         MethodInfo[] methods;
         if (Constants.TypeMethods.TryGetValue(type, out var typeMethod))
         {
@@ -45,7 +46,7 @@ public static class TypeExtensions
         }
 
         var result = methods.FirstOrDefault(x => x.ToString()!.Equals(method));
-        if (result != null) Methods[method] = result;
+        if (result != null) Methods[key] = result;
         return result;
     }
 

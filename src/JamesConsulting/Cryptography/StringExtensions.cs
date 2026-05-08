@@ -100,7 +100,7 @@ public static class StringExtensions
     /// </summary>
     /// <param name="target">The input string to hash.</param>
     /// <param name="numberOfRounds">The PBKDF2 iteration count. Defaults to 100,000.</param>
-    /// <param name="algorithm">The hash algorithm (defaults to <see cref="HashAlgorithmName.SHA256" />).</param>
+    /// <param name="algorithm">The hash algorithm; defaults to <see cref="HashAlgorithmName.SHA256" /> on .NET Standard 2.1+, .NET Framework 4.7.2+, and modern .NET. On the legacy <c>net462</c> and <c>netstandard2.0</c> targets only the default SHA1 is supported; supplying any other <see cref="HashAlgorithmName" /> on those frameworks throws <see cref="PlatformNotSupportedException" />.</param>
     /// <returns>A tuple containing the Base64 encoded hash and the generated salt.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="target" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="target" /> is empty.</exception>
@@ -134,7 +134,7 @@ public static class StringExtensions
     /// <param name="target">The input string.</param>
     /// <param name="salt">The cryptographic salt (must not be null or empty).</param>
     /// <param name="numberOfRounds">The PBKDF2 iteration count. Defaults to 100,000.</param>
-    /// <param name="algorithm">The hash algorithm (defaults to <see cref="HashAlgorithmName.SHA256" />).</param>
+    /// <param name="algorithm">The hash algorithm; defaults to <see cref="HashAlgorithmName.SHA256" /> on .NET Standard 2.1+, .NET Framework 4.7.2+, and modern .NET. On the legacy <c>net462</c> and <c>netstandard2.0</c> targets only the default SHA1 is supported; supplying any other <see cref="HashAlgorithmName" /> on those frameworks throws <see cref="PlatformNotSupportedException" />.</param>
     /// <returns>The Base64 encoded PBKDF2 derived key.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="target" /> or <paramref name="salt" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="target" /> or <paramref name="salt" /> is empty.</exception>
@@ -171,6 +171,10 @@ public static class StringExtensions
             Rfc2898DeriveBytes.Pbkdf2(bytes, salt, derived, numberOfRounds, effectiveAlgorithm);
             return Convert.ToBase64String(derived);
 #elif NET462 || NETSTANDARD2_0
+        if (algorithm.HasValue && algorithm.Value != HashAlgorithmName.SHA1)
+            throw new PlatformNotSupportedException(
+                "Custom PBKDF2 hash algorithms require .NET Standard 2.1, .NET Framework 4.7.2, or .NET 8 or later. " +
+                "On the current target framework, only the legacy SHA1 default is supported.");
         using var rfc2898DeriveBytes = new Rfc2898DeriveBytes(Encoding.UTF8.GetBytes(target), salt, numberOfRounds);
         var hash = rfc2898DeriveBytes.GetBytes(32);
         return Convert.ToBase64String(hash);
