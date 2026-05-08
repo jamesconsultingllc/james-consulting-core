@@ -38,7 +38,7 @@ dotnet add package JamesConsulting
 | `JamesConsulting.Cryptography` | Hashing/encoding helpers on top of `string` |
 | `JamesConsulting.Hosting` | `HostExtensions`, `IHostInitializer` / `IHostInitializerAsync` — run async one-shot startup work inside `IHost` before `RunAsync()` |
 | `JamesConsulting.IO` | `StreamExtensions` (read-to-end, copy with progress, etc.) |
-| `JamesConsulting.Net` | `ConnectToSharedFolder` — UNC/SMB credential impersonation (Windows-only at runtime; safe-no-op on macOS/Linux) |
+| `JamesConsulting.Net` | `ConnectToSharedFolder` — UNC/SMB credential impersonation. `Connect()` is Windows-only and throws `PlatformNotSupportedException` on macOS/Linux; `Dispose()` and the finalizer are safe no-ops on non-Windows. |
 | `JamesConsulting.Reflection` | `TypeExtensions` (default value resolution, async-method detection), `MethodInfoExtensions` |
 | `JamesConsulting.Security` | `SecureStringExtensions`, additional `StringExtensions` |
 | `JamesConsulting.Threading` | Async helpers on top of `MethodInfo` |
@@ -60,8 +60,10 @@ This is a **breaking** modernization. If you're upgrading from `1.x`, read this 
   types, and `ParamName`s are preserved — so consumers should see no observable difference at
   runtime, but the library no longer pulls Metalama into your build graph.
 - **Trimmed transitive surface.** Single hosting reference (`Microsoft.Extensions.Hosting.Abstractions 10.0.0`).
-- **macOS / Linux safety.** `ConnectToSharedFolder.Dispose()` and the finalizer now no-op on non-Windows
-  OSes instead of `DllNotFoundException`-crashing tests under those runtimes.
+- **macOS / Linux behavior.** `ConnectToSharedFolder.Connect()` throws
+  `PlatformNotSupportedException` on non-Windows OSes (it wraps Win32 `WNetAddConnection2W`).
+  `Dispose()` and the finalizer are safe no-ops on those platforms instead of
+  `DllNotFoundException`-crashing tests.
 - **Centralized package metadata** via `src/Directory.Build.props` (Authors, Company, Copyright,
   deterministic builds, embedded source, NBGV, SourceLink). No per-file copyright headers anymore.
 - **Continuous deployment.** Single `ci.yml` GitHub Actions workflow replaces the old split

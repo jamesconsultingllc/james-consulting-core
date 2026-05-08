@@ -35,20 +35,33 @@ public static class StreamExtensions
     public static bool IsExecutable(this Stream stream)
     {
         Guard.NotNull(stream);
-        Span<byte> firstBytes = stackalloc byte[2];
         var originalPosition = stream.Position;
         try
         {
             stream.Position = 0;
+#if NETSTANDARD2_0
+            var buffer = new byte[2];
             var total = 0;
             while (total < 2)
             {
-                var read = stream.Read(firstBytes.Slice(total));
+                var read = stream.Read(buffer, total, 2 - total);
                 if (read == 0) return false;
                 total += read;
             }
 
-            return firstBytes[0] == (byte)'M' && firstBytes[1] == (byte)'Z';
+            return buffer[0] == (byte)'M' && buffer[1] == (byte)'Z';
+#else
+            Span<byte> buffer = stackalloc byte[2];
+            var total = 0;
+            while (total < 2)
+            {
+                var read = stream.Read(buffer.Slice(total));
+                if (read == 0) return false;
+                total += read;
+            }
+
+            return buffer[0] == (byte)'M' && buffer[1] == (byte)'Z';
+#endif
         }
         finally
         {

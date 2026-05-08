@@ -27,7 +27,7 @@ public static class StringExtensions
 
         fixed (char* ptr = str)
         {
-            return new SecureString(ptr, str.Length);
+            return new SecureString(ptr, str!.Length);
         }
     }
 }
