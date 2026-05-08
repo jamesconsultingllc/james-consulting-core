@@ -5,8 +5,7 @@
     "precision": "major"
   },
   "publicReleaseRefSpec": [
-    "^refs/heads/master$",
-    "^refs/heads/main$"
+    "^refs/heads/master$"
   ],
   "cloudBuild": {
     "buildNumber": {
