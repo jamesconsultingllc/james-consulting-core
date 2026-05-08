@@ -1,4 +1,5 @@
-﻿using System.Security;
+﻿using System;
+using System.Security;
 using FluentAssertions;
 using JamesConsulting.Security;
 using Xunit;
@@ -23,5 +24,21 @@ public class SecureStringExtensionsTests
         secureString.AppendChar('t');
 
         secureString.ConvertToString().Should().Be("test");
+    }
+
+    /// <summary>
+    /// 2.0 breaking change: <see cref="SecureStringExtensions.ConvertToString"/> now
+    /// throws <see cref="ArgumentNullException"/> for a null receiver via
+    /// <c>Guard.NotNull</c>, instead of the prior <see cref="NullReferenceException"/>
+    /// raised when the runtime dereferenced <c>secureString.Length</c>. This regression
+    /// test pins the contract so the guard cannot be silently removed.
+    /// </summary>
+    [Fact]
+    public void ConvertToString_NullReceiver_ThrowsArgumentNullException()
+    {
+        SecureString? secureString = null;
+        Action act = () => secureString!.ConvertToString();
+        act.Should().Throw<ArgumentNullException>()
+           .WithParameterName("secureString");
     }
 }

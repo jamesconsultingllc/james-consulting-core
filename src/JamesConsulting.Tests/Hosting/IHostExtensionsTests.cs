@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using JamesConsulting.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Moq;
+using NSubstitute;
 using Xunit;
 
 namespace JamesConsulting.Tests.Hosting;
@@ -22,18 +22,13 @@ public class HostExtensionsTests
     public async Task InitializeAsyncCallInitializeOnHostInitializers()
     {
         var services = CreateInitializers<IHostInitializerAsync>(3);
-        var serviceProvider = new Mock<IServiceProvider>();
-        var serviceScopeFactory = new Mock<IServiceScopeFactory>();
-        var serviceScope = new Mock<IServiceScope>();
-        serviceScope.SetupGet(x => x.ServiceProvider).Returns(serviceProvider.Object);
-        serviceScopeFactory.Setup(x => x.CreateScope()).Returns(serviceScope.Object);
-        serviceProvider.Setup(x => x.GetService(typeof(IEnumerable<IHostInitializerAsync>)))
-            .Returns(services.Select(x => x.Object));
-        serviceProvider.Setup(x => x.GetService(typeof(IServiceScopeFactory))).Returns(serviceScopeFactory.Object);
-        var host = new Mock<IHost>();
-        host.SetupGet(x => x.Services).Returns(serviceProvider.Object);
-        await host.Object.InitializeAsync();
-        services.ForEach(x => x.Verify(y => y.InitializeAsync(), Times.Once()));
+        var host = BuildHost(services, (sp, instances) =>
+            sp.GetService(typeof(IEnumerable<IHostInitializerAsync>)).Returns(instances));
+
+        await host.InitializeAsync();
+
+        foreach (var initializer in services)
+            await initializer.Received(1).InitializeAsync();
     }
 
     [Fact]
@@ -41,23 +36,15 @@ public class HostExtensionsTests
     {
         var tcs1 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var tcs2 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var init1 = new Mock<IHostInitializerAsync>();
-        var init2 = new Mock<IHostInitializerAsync>();
-        init1.Setup(x => x.InitializeAsync()).Returns(tcs1.Task);
-        init2.Setup(x => x.InitializeAsync()).Returns(tcs2.Task);
+        var init1 = Substitute.For<IHostInitializerAsync>();
+        var init2 = Substitute.For<IHostInitializerAsync>();
+        init1.InitializeAsync().Returns(tcs1.Task);
+        init2.InitializeAsync().Returns(tcs2.Task);
 
-        var serviceProvider = new Mock<IServiceProvider>();
-        var serviceScopeFactory = new Mock<IServiceScopeFactory>();
-        var serviceScope = new Mock<IServiceScope>();
-        serviceScope.SetupGet(x => x.ServiceProvider).Returns(serviceProvider.Object);
-        serviceScopeFactory.Setup(x => x.CreateScope()).Returns(serviceScope.Object);
-        serviceProvider.Setup(x => x.GetService(typeof(IEnumerable<IHostInitializerAsync>)))
-            .Returns(new[] { init1.Object, init2.Object });
-        serviceProvider.Setup(x => x.GetService(typeof(IServiceScopeFactory))).Returns(serviceScopeFactory.Object);
-        var host = new Mock<IHost>();
-        host.SetupGet(x => x.Services).Returns(serviceProvider.Object);
+        var host = BuildHost(new[] { init1, init2 }, (sp, instances) =>
+            sp.GetService(typeof(IEnumerable<IHostInitializerAsync>)).Returns(instances));
 
-        var pending = host.Object.InitializeAsync();
+        var pending = host.InitializeAsync();
         Assert.False(pending.IsCompleted, "InitializeAsync must not complete before all initializers complete.");
 
         tcs1.SetResult(true);
@@ -74,7 +61,6 @@ public class HostExtensionsTests
         await Assert.ThrowsAsync<ArgumentNullException>(() => default(IHost)!.InitializeAsync());
     }
 
-
     /// <summary>
     /// Tests that the InitializeAsync method calls InitializeAsync on all IHostInitializerAsync instances.
     /// </summary>
@@ -82,18 +68,13 @@ public class HostExtensionsTests
     public void InitializeCallInitializeOnHostInitializers()
     {
         var services = CreateInitializers<IHostInitializer>(3);
-        var serviceProvider = new Mock<IServiceProvider>();
-        var serviceScopeFactory = new Mock<IServiceScopeFactory>();
-        var serviceScope = new Mock<IServiceScope>();
-        serviceScope.SetupGet(x => x.ServiceProvider).Returns(serviceProvider.Object);
-        serviceScopeFactory.Setup(x => x.CreateScope()).Returns(serviceScope.Object);
-        serviceProvider.Setup(x => x.GetService(typeof(IEnumerable<IHostInitializer>)))
-            .Returns(services.Select(x => x.Object));
-        serviceProvider.Setup(x => x.GetService(typeof(IServiceScopeFactory))).Returns(serviceScopeFactory.Object);
-        var host = new Mock<IHost>();
-        host.SetupGet(x => x.Services).Returns(serviceProvider.Object);
-        host.Object.Initialize();
-        services.ForEach(x => x.Verify(y => y.Initialize(), Times.Once()));
+        var host = BuildHost(services, (sp, instances) =>
+            sp.GetService(typeof(IEnumerable<IHostInitializer>)).Returns(instances));
+
+        host.Initialize();
+
+        foreach (var initializer in services)
+            initializer.Received(1).Initialize();
     }
 
     /// <summary>
@@ -105,13 +86,29 @@ public class HostExtensionsTests
         Assert.Throws<ArgumentNullException>(() => default(IHost)!.Initialize());
     }
 
-    private static List<Mock<T>> CreateInitializers<T>(int count)
+    private static IList<T> CreateInitializers<T>(int count)
         where T : class
     {
-        var list = new List<Mock<T>>();
-
-        for (var i = 0; i < count; i++) list.Add(new Mock<T>());
-
+        var list = new List<T>();
+        for (var i = 0; i < count; i++) list.Add(Substitute.For<T>());
         return list;
+    }
+
+    private static IHost BuildHost<T>(
+        IEnumerable<T> initializers,
+        Action<IServiceProvider, IEnumerable<T>> wireEnumerable)
+        where T : class
+    {
+        var serviceProvider = Substitute.For<IServiceProvider>();
+        var serviceScopeFactory = Substitute.For<IServiceScopeFactory>();
+        var serviceScope = Substitute.For<IServiceScope>();
+        serviceScope.ServiceProvider.Returns(serviceProvider);
+        serviceScopeFactory.CreateScope().Returns(serviceScope);
+        wireEnumerable(serviceProvider, initializers);
+        serviceProvider.GetService(typeof(IServiceScopeFactory)).Returns(serviceScopeFactory);
+
+        var host = Substitute.For<IHost>();
+        host.Services.Returns(serviceProvider);
+        return host;
     }
 }
