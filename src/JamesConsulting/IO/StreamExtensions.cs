@@ -17,6 +17,7 @@ public static class StreamExtensions
     /// <param name="stream">The stream to inspect. Must be readable and seekable.</param>
     /// <returns><c>true</c> if the first two bytes match "MZ"; otherwise <c>false</c>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="stream" /> is <c>null</c>.</exception>
+    /// <remarks>The original <see cref="Stream.Position" /> is restored on return.</remarks>
     /// <example>
     /// Detect executable signature.
     /// <code>
@@ -36,9 +37,17 @@ public static class StreamExtensions
     {
         Guard.NotNull(stream);
         var firstBytes = new byte[2];
-        stream.Position = 0;
-        var read = stream.Read(firstBytes, 0, 2);
-        return read == 2 && Encoding.UTF8.GetString(firstBytes) == "MZ";
+        var originalPosition = stream.Position;
+        try
+        {
+            stream.Position = 0;
+            var read = stream.Read(firstBytes, 0, 2);
+            return read == 2 && Encoding.UTF8.GetString(firstBytes) == "MZ";
+        }
+        finally
+        {
+            stream.Position = originalPosition;
+        }
     }
 
     /// <summary>

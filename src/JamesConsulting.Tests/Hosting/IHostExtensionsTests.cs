@@ -37,6 +37,38 @@ public class HostExtensionsTests
     }
 
     [Fact]
+    public async Task InitializeAsyncDoesNotCompleteUntilAllInitializersComplete()
+    {
+        var tcs1 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs2 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var init1 = new Mock<IHostInitializerAsync>();
+        var init2 = new Mock<IHostInitializerAsync>();
+        init1.Setup(x => x.InitializeAsync()).Returns(tcs1.Task);
+        init2.Setup(x => x.InitializeAsync()).Returns(tcs2.Task);
+
+        var serviceProvider = new Mock<IServiceProvider>();
+        var serviceScopeFactory = new Mock<IServiceScopeFactory>();
+        var serviceScope = new Mock<IServiceScope>();
+        serviceScope.SetupGet(x => x.ServiceProvider).Returns(serviceProvider.Object);
+        serviceScopeFactory.Setup(x => x.CreateScope()).Returns(serviceScope.Object);
+        serviceProvider.Setup(x => x.GetService(typeof(IEnumerable<IHostInitializerAsync>)))
+            .Returns(new[] { init1.Object, init2.Object });
+        serviceProvider.Setup(x => x.GetService(typeof(IServiceScopeFactory))).Returns(serviceScopeFactory.Object);
+        var host = new Mock<IHost>();
+        host.SetupGet(x => x.Services).Returns(serviceProvider.Object);
+
+        var pending = host.Object.InitializeAsync();
+        Assert.False(pending.IsCompleted, "InitializeAsync must not complete before all initializers complete.");
+
+        tcs1.SetResult(true);
+        Assert.False(pending.IsCompleted, "InitializeAsync must wait for every initializer, not the first one.");
+
+        tcs2.SetResult(true);
+        await pending;
+        Assert.True(pending.IsCompletedSuccessfully);
+    }
+
+    [Fact]
     public async Task InitializeAsyncNullHostThrowsArgumentNullException()
     {
         await Assert.ThrowsAsync<ArgumentNullException>(() => default(IHost)!.InitializeAsync());
