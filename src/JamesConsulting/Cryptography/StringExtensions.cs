@@ -163,9 +163,9 @@ public static class StringExtensions
         if (numberOfRounds < 100_000)
             throw new ArgumentOutOfRangeException(nameof(numberOfRounds), "Iteration count must be >= 100,000.");
 
-        var effectiveAlgorithm = algorithm ?? HashAlgorithmName.SHA256;
 #if NET8_0_OR_GREATER
         // Static PBKDF2 helper for newer frameworks.
+        var effectiveAlgorithm = algorithm ?? HashAlgorithmName.SHA256;
         var bytes = Encoding.UTF8.GetBytes(target);
         Span<byte> derived = stackalloc byte[32];
         Rfc2898DeriveBytes.Pbkdf2(bytes, salt, derived, numberOfRounds, effectiveAlgorithm);
@@ -179,6 +179,7 @@ public static class StringExtensions
         var hash = rfc2898DeriveBytes.GetBytes(32);
         return Convert.ToBase64String(hash);
 #else
+        var effectiveAlgorithm = algorithm ?? HashAlgorithmName.SHA256;
         using var rfc2898DeriveBytes = new Rfc2898DeriveBytes(
             Encoding.UTF8.GetBytes(target), salt, numberOfRounds, effectiveAlgorithm);
         var hash = rfc2898DeriveBytes.GetBytes(32);
