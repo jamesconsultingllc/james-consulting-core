@@ -25,6 +25,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  actions: write   # actions/upload-artifact@v4 uses the Actions API to create artifact records.
 
 env:
   PACKAGE_PROJECT: src/JamesConsulting/JamesConsulting.csproj
@@ -143,6 +144,7 @@ jobs:
     permissions:
       id-token: write   # Required for OIDC (azure/login + NuGet/login)
       contents: read
+      actions: write   # actions/upload-artifact@v4 uses the Actions API to create artifact records.
 
     steps:
       - name: Checkout
@@ -267,6 +269,7 @@ jobs:
     permissions:
       id-token: write
       contents: write  # Required by softprops/action-gh-release. RC job does not get this.
+      actions: write   # actions/upload-artifact@v4 uses the Actions API to create artifact records.
 
     steps:
       - name: Checkout
