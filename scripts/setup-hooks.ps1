@@ -5,9 +5,10 @@
 
 .DESCRIPTION
     Wires `git config core.hooksPath .githooks` so the shell pre-commit hook
-    runs on every commit. Also installs the JetBrains InspectCode CLI
-    (`jb`) as a global dotnet tool if it's not already on PATH and `dotnet`
-    is available.
+    runs on every commit. Then runs `dotnet tool restore` to install the
+    JetBrains InspectCode CLI (`jb`) at the version pinned in
+    `.config/dotnet-tools.json`. The tool is invoked locally as `dotnet jb`,
+    not as a global tool, so every developer + CI run the same version.
 
     Idempotent — safe to re-run.
 
@@ -15,7 +16,8 @@
 #>
 [CmdletBinding()]
 param(
-    [switch] $SkipJbInstall
+    [Alias('SkipJbInstall')]
+    [switch] $SkipJbRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,8 +49,8 @@ if ((Test-Path $hook) -and (-not $IsWindows)) {
 #    so every developer + CI runs the exact same InspectCode version.
 #    `dotnet tool restore` is idempotent: it re-uses the existing install when
 #    the manifest version is already present.
-if ($SkipJbInstall) {
-    Write-Host "↷ skipping jb restore (-SkipJbInstall)" -ForegroundColor DarkGray
+if ($SkipJbRestore) {
+    Write-Host "↷ skipping jb restore (-SkipJbRestore)" -ForegroundColor DarkGray
 } elseif (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     Write-Warning "dotnet not found on PATH. Install the .NET SDK then re-run this script."
 } else {

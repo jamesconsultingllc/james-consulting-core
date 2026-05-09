@@ -113,7 +113,8 @@ jobs:
                   Where-Object { $_ -ne '' }
           } else { @() }
           $staged = @($stagedRaw | ForEach-Object { $_ -replace '\\','/' })
-          $stagedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+          $stagedSet = [System.Collections.Generic.HashSet[string]]::new(
+              ($IsWindows ? [StringComparer]::OrdinalIgnoreCase : [StringComparer]::Ordinal))
           $staged | ForEach-Object { [void]$stagedSet.Add($_) }
 
           $sarif = Get-Content inspectcode.sarif -Raw | ConvertFrom-Json

@@ -7,9 +7,18 @@
     Fails the commit when any warning-level Rider/Roslyn inspection fires in
     a staged file. Note-level suggestions are ignored.
 
-    First run: if `jb` is missing and `dotnet` is on PATH, this script will
-    install JetBrains.ReSharper.GlobalTools as a global tool automatically.
-    Pass `-SkipAutoInstall` to disable that behavior.
+    Tool resolution (in order):
+      1. If `.config/dotnet-tools.json` exists and `dotnet` is on PATH, the
+         script runs `dotnet tool restore` and invokes `dotnet jb` — i.e.
+         the manifest-pinned local tool. This is the preferred path in
+         this repo and keeps every developer + CI on the same version.
+      2. Otherwise, falls back to a globally-installed `jb` (legacy).
+      3. If neither is available and `dotnet` is on PATH, performs a one-
+         time `dotnet tool install -g JetBrains.ReSharper.GlobalTools`
+         (only when no manifest is present). Pass `-SkipAutoInstall` to
+         disable that fallback install. `-SkipAutoInstall` does NOT skip
+         the manifest-based `dotnet tool restore` — that path always
+         runs when a manifest is present.
 
     Bypass in an emergency with: git commit --no-verify
 
@@ -62,6 +71,10 @@ if (-not $stagedFiles) {
     Write-Host "pre-commit: no staged .cs files - skipping inspection." -ForegroundColor DarkGray
     exit 0
 }
+
+# Use case-sensitive comparisons on POSIX filesystems (Linux/macOS) where
+# Foo.cs and foo.cs are distinct files. Windows/NTFS is case-insensitive.
+$pathComparer = if ($IsWindows) { [StringComparer]::OrdinalIgnoreCase } else { [StringComparer]::Ordinal }
 
 function Ensure-Jb {
     # Prefer the manifest-pinned local tool (`dotnet jb`) over a globally-
@@ -156,6 +169,15 @@ $jbExit = $LASTEXITCODE
 $sw.Stop()
 Write-Host "pre-commit: inspection finished in $([int]$sw.Elapsed.TotalSeconds)s." -ForegroundColor DarkGray
 
+# Helper so the temp SARIF file is removed on every exit path — success,
+# parse error, jb failure, or missing report. PowerShell `exit` skips
+# enclosing `finally` blocks, so we explicitly cleanup before each `exit`.
+function Remove-Report {
+    if ($script:reportPath -and (Test-Path $script:reportPath)) {
+        Remove-Item $script:reportPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Build a copy/paste-safe rerun command. Quote any arg that contains whitespace
 # or shell metacharacters so the temp SARIF path (and any other surprising
 # value) round-trips correctly.
@@ -176,6 +198,7 @@ $rerunParts = @($jb.Command) + $jb.Prefix + $jbArgs
 $rerunCmd = ($rerunParts | ForEach-Object { Format-ShellArg $_ }) -join ' '
 
 if ($jbExit -ne 0) {
+    Remove-Report
     Write-Host "" -ForegroundColor Red
     Write-Host "pre-commit: '$($jb.Command) $($jb.Prefix -join ' ') inspectcode' exited with code $jbExit (restore/build/tool failure)." -ForegroundColor Red
     Write-Host "  Re-run manually to see the full output:" -ForegroundColor Yellow
@@ -185,17 +208,26 @@ if ($jbExit -ne 0) {
 }
 
 if (-not (Test-Path $reportPath)) {
+    # No report produced — nothing to clean up, but call Remove-Report for
+    # symmetry in case a partial file exists.
+    Remove-Report
     Write-Host "pre-commit: 'jb inspectcode' returned 0 but produced no report at $reportPath." -ForegroundColor Red
     Write-Host "  This usually means the include mask matched no files in the solution." -ForegroundColor Yellow
     Write-Host "  Bypass with: git commit --no-verify" -ForegroundColor Yellow
     exit 1
 }
 
-$stagedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$stagedSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
 $stagedFiles | ForEach-Object { [void]$stagedSet.Add(($_ -replace '\\', '/')) }
 
-$sarif = Get-Content $reportPath -Raw | ConvertFrom-Json
-Remove-Item $reportPath -Force -ErrorAction SilentlyContinue
+try {
+    $sarif = Get-Content $reportPath -Raw | ConvertFrom-Json
+} catch {
+    Remove-Report
+    Write-Host "pre-commit: failed to parse SARIF report at ${reportPath}: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+Remove-Report
 
 # Normalize IgnoredRules: trim, drop empties, and split on commas in case a
 # single comma-separated string was passed (e.g., `-IgnoredRules "IDE0005, CA1822"`).
