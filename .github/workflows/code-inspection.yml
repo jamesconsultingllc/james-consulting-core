@@ -101,10 +101,20 @@ jobs:
           function Normalize-SarifUri {
             param([Parameter(Mandatory)][string]$Uri)
             $u = $Uri
-            if ($u -match '^file:/{2,3}') { $u = $u -replace '^file:/{2,3}', '/' }
+            # file:// URIs need [System.Uri] parsing to handle Windows-form
+            # `file:///C:/...` correctly (a naive scheme strip would leave
+            # `/C:/...` which never matches the workspace root).
+            if ($u -match '^file:') {
+              try {
+                $u = ([System.Uri]$u).LocalPath
+              } catch {
+                $u = $u -replace '^file:/{2,3}', ''
+              }
+            }
             $u = $u -replace '\\','/'
             if ($u -like './*') { $u = $u.Substring(2) }
-            if ($u -like "$workspacePosix/*") { $u = $u.Substring($workspacePosix.Length + 1) }
+            $cmp = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+            if ($u.StartsWith("$workspacePosix/", $cmp)) { $u = $u.Substring($workspacePosix.Length + 1) }
             return $u.TrimStart('/')
           }
 

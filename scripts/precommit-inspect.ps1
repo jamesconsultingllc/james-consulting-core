@@ -179,11 +179,22 @@ $repoRootPosix = ($repoRoot -replace '\\', '/').TrimEnd('/')
 function Normalize-SarifUri {
     param([Parameter(Mandatory)][string]$Uri)
     $u = $Uri
-    if ($u -match '^file:/{2,3}') { $u = $u -replace '^file:/{2,3}', '/' }
+    # file:// URIs need [System.Uri] parsing to handle Windows-form
+    # `file:///C:/repo/...` correctly. A naive `^file:/{2,3}` -> '/'
+    # replace would yield '/C:/repo/...' which would never match
+    # $repoRootPosix on Windows.
+    if ($u -match '^file:') {
+        try {
+            $u = ([System.Uri]$u).LocalPath
+        } catch {
+            $u = $u -replace '^file:/{2,3}', ''
+        }
+    }
     $u = $u -replace '\\', '/'
     if ($u -like './*') { $u = $u.Substring(2) }
-    # Absolute path inside the repo root → strip prefix.
-    if ($u -like "$repoRootPosix/*") { $u = $u.Substring($repoRootPosix.Length + 1) }
+    # Absolute path inside the repo root → strip prefix (case-insensitive on Windows).
+    $cmp = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    if ($u.StartsWith("$repoRootPosix/", $cmp)) { $u = $u.Substring($repoRootPosix.Length + 1) }
     return $u.TrimStart('/')
 }
 
