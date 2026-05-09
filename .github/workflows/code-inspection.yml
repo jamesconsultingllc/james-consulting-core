@@ -3,6 +3,7 @@ name: Code Inspection
 on:
   pull_request:
     branches:
+      - main
       - master
       - develop
     paths:
@@ -91,10 +92,26 @@ jobs:
           $staged | ForEach-Object { [void]$stagedSet.Add($_) }
 
           $sarif = Get-Content inspectcode.sarif -Raw | ConvertFrom-Json
+
+          # Normalize SARIF artifactLocation.uri — may be repo-relative POSIX,
+          # absolute, file:// URI, or './'-prefixed. Without this, real
+          # violations could be silently dropped from $stagedSet membership
+          # and the gate would pass commits it should block.
+          $workspacePosix = ('${{ github.workspace }}' -replace '\\','/').TrimEnd('/')
+          function Normalize-SarifUri {
+            param([Parameter(Mandatory)][string]$Uri)
+            $u = $Uri
+            if ($u -match '^file:/{2,3}') { $u = $u -replace '^file:/{2,3}', '/' }
+            $u = $u -replace '\\','/'
+            if ($u -like './*') { $u = $u.Substring(2) }
+            if ($u -like "$workspacePosix/*") { $u = $u.Substring($workspacePosix.Length + 1) }
+            return $u.TrimStart('/')
+          }
+
           $failures = @($sarif.runs[0].results | Where-Object {
               $_.level -eq 'warning' -and
               $_.ruleId -notin $ignored -and
-              $stagedSet.Contains(($_.locations[0].physicalLocation.artifactLocation.uri -replace '\\','/'))
+              $stagedSet.Contains((Normalize-SarifUri $_.locations[0].physicalLocation.artifactLocation.uri))
           })
 
           if ($failures.Count -eq 0) {
@@ -102,12 +119,23 @@ jobs:
             exit 0
           }
 
+          # Escape GitHub workflow-command special chars (%, CR, LF, :) in the
+          # message so SARIF text can't break ::error parsing or inject
+          # workflow commands. Per docs:
+          # https://docs.github.com/en/actions/learn-github-actions/workflow-commands-for-github-actions#example-escaping-data
+          function Escape-WorkflowData {
+            param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+            return ($Value -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A' -replace ':','%3A')
+          }
+
           Write-Host "::error::$($failures.Count) blocking inspection issue(s) in changed files:"
           foreach ($f in $failures) {
             $loc = $f.locations[0].physicalLocation
-            $file = $loc.artifactLocation.uri
+            $file = Normalize-SarifUri $loc.artifactLocation.uri
             $line = $loc.region.startLine
-            Write-Host ("::error file={0},line={1},title={2}::{3}" -f $file, $line, $f.ruleId, $f.message.text)
+            $msg  = Escape-WorkflowData ($f.message.text)
+            $rule = Escape-WorkflowData ($f.ruleId)
+            Write-Host ("::error file={0},line={1},title={2}::{3}" -f $file, $line, $rule, $msg)
           }
           exit 1
 

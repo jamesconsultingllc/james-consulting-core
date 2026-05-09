@@ -150,15 +150,47 @@ $stagedFiles | ForEach-Object { [void]$stagedSet.Add(($_ -replace '\\', '/')) }
 $sarif = Get-Content $reportPath -Raw | ConvertFrom-Json
 Remove-Item $reportPath -Force -ErrorAction SilentlyContinue
 
+# Normalize IgnoredRules: trim, drop empties, and split on commas in case a
+# single comma-separated string was passed (e.g., `-IgnoredRules "IDE0005, CA1822"`).
+# Without this, callers passing a CSV value would never match because the leading
+# space (or the bare comma) would prevent equality with SARIF rule IDs.
+$ignoredRulesNormalized = @(
+    $IgnoredRules |
+        Where-Object { $_ -ne $null } |
+        ForEach-Object { $_ -split ',' } |
+        ForEach-Object { $_.Trim() } |
+        Where-Object   { $_ -ne '' }
+)
+
 $results = @($sarif.runs[0].results | Where-Object {
         $_.level -eq 'warning' -and
-        $_.ruleId -notin $IgnoredRules
+        $_.ruleId -notin $ignoredRulesNormalized
     })
+
+# SARIF artifactLocation.uri can be:
+#   - repo-relative POSIX path (the common case from `jb inspectcode`)
+#   - absolute path (Windows or POSIX)
+#   - file:// or file:/// URI
+#   - './'-prefixed repo-relative path
+# Normalize all of these to repo-relative POSIX before set membership, otherwise
+# real violations in staged files would silently fall through and the gate would
+# pass commits it should block.
+$repoRootPosix = ($repoRoot -replace '\\', '/').TrimEnd('/')
+function Normalize-SarifUri {
+    param([Parameter(Mandatory)][string]$Uri)
+    $u = $Uri
+    if ($u -match '^file:/{2,3}') { $u = $u -replace '^file:/{2,3}', '/' }
+    $u = $u -replace '\\', '/'
+    if ($u -like './*') { $u = $u.Substring(2) }
+    # Absolute path inside the repo root → strip prefix.
+    if ($u -like "$repoRootPosix/*") { $u = $u.Substring($repoRootPosix.Length + 1) }
+    return $u.TrimStart('/')
+}
 
 # Only fail for issues in files that were actually staged (filename-wildcard
 # include may match same-named files in other folders).
 $failures = @($results | Where-Object {
-        $uri = $_.locations[0].physicalLocation.artifactLocation.uri -replace '\\', '/'
+        $uri = Normalize-SarifUri $_.locations[0].physicalLocation.artifactLocation.uri
         $stagedSet.Contains($uri)
     })
 
