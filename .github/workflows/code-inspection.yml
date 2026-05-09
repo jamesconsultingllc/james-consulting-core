@@ -17,6 +17,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  actions: write   # actions/upload-artifact@v4 uses the Actions API to create artifact records.
 
 env:
   SOLUTION: 'src/JamesConsulting.sln'
