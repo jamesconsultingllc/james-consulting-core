@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+# Pre-commit hook: runs JetBrains InspectCode on staged .cs files.
+# Best-effort: skipped silently if PowerShell or `jb` is not on PATH.
+#
+# Bypass in emergencies with: git commit --no-verify
+#
+# One-time setup per clone (installs jb on first use if missing):
+#   pwsh scripts/setup-hooks.ps1
+
+set -e
+
+if command -v pwsh >/dev/null 2>&1; then
+  PS="pwsh"
+elif command -v powershell >/dev/null 2>&1; then
+  PS="powershell"
+else
+  echo "pre-commit: neither 'pwsh' nor 'powershell' found on PATH; skipping hooks" >&2
+  exit 0
+fi
+
+"$PS" -NoProfile -ExecutionPolicy Bypass -File scripts/precommit-inspect.ps1

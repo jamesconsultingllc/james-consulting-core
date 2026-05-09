@@ -1,0 +1,113 @@
+name: Code Inspection
+
+on:
+  pull_request:
+    branches:
+      - master
+      - develop
+    paths:
+      - 'src/**/*.cs'
+      - 'src/JamesConsulting.sln'
+      - 'src/Directory.Build.props'
+      - 'src/Directory.Build.targets'
+      - '.editorconfig'
+      - '.github/workflows/code-inspection.yml'
+      - 'scripts/precommit-inspect.ps1'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  SOLUTION: 'src/JamesConsulting.sln'
+  # No rules currently excluded. Add rule IDs (comma-separated) here if a regression window requires it.
+  IGNORED_RULES: ''
+
+jobs:
+  inspect:
+    name: JetBrains InspectCode
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Restore solution
+        run: dotnet restore ${{ env.SOLUTION }}
+
+      - name: Install JetBrains InspectCode
+        run: dotnet tool install -g JetBrains.ReSharper.GlobalTools
+
+      - name: Determine changed .cs files
+        id: changed
+        shell: bash
+        run: |
+          set -e
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          files=$(git diff --name-only --diff-filter=ACMR "$base" "$head" | grep -E '\.cs$' || true)
+          if [ -z "$files" ]; then
+            echo "No .cs files changed — skipping inspection."
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          mask=$(printf '%s\n' "$files" | xargs -n1 basename | sort -u | sed 's#^#**/#' | paste -sd ';' -)
+          echo "mask=$mask" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$files" > .changed-files.txt
+
+      - name: Run InspectCode
+        if: steps.changed.outputs.count != '0'
+        run: |
+          jb inspectcode "${{ env.SOLUTION }}" \
+            --output=inspectcode.sarif \
+            --include="${{ steps.changed.outputs.mask }}" \
+            --no-build \
+            --verbosity=WARN
+
+      - name: Report issues
+        if: steps.changed.outputs.count != '0'
+        shell: pwsh
+        run: |
+          $ignored = '${{ env.IGNORED_RULES }}' -split ','
+          $staged = @(Get-Content .changed-files.txt) | ForEach-Object { $_ -replace '\\','/' }
+          $stagedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+          $staged | ForEach-Object { [void]$stagedSet.Add($_) }
+
+          $sarif = Get-Content inspectcode.sarif -Raw | ConvertFrom-Json
+          $failures = @($sarif.runs[0].results | Where-Object {
+              $_.level -eq 'warning' -and
+              $_.ruleId -notin $ignored -and
+              $stagedSet.Contains(($_.locations[0].physicalLocation.artifactLocation.uri -replace '\\','/'))
+          })
+
+          if ($failures.Count -eq 0) {
+            Write-Host "::notice::No blocking inspection issues in changed files."
+            exit 0
+          }
+
+          Write-Host "::error::$($failures.Count) blocking inspection issue(s) in changed files:"
+          foreach ($f in $failures) {
+            $loc = $f.locations[0].physicalLocation
+            $file = $loc.artifactLocation.uri
+            $line = $loc.region.startLine
+            Write-Host ("::error file={0},line={1},title={2}::{3}" -f $file, $line, $f.ruleId, $f.message.text)
+          }
+          exit 1
+
+      - name: Upload SARIF report
+        if: always() && steps.changed.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: inspectcode-sarif
+          path: inspectcode.sarif
+          if-no-files-found: ignore
