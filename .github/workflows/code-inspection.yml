@@ -29,12 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: |
             9.0.x
@@ -78,7 +78,13 @@ jobs:
         if: steps.changed.outputs.count != '0'
         shell: pwsh
         run: |
-          $ignored = '${{ env.IGNORED_RULES }}' -split ','
+          # Trim each entry and drop empties so values like "IDE0005, CA1822" or
+          # a stray trailing comma still produce clean rule IDs that match the
+          # SARIF results. Without this, " CA1822" (leading space) would never
+          # match and the intended ignore would silently no-op.
+          $ignored = @('${{ env.IGNORED_RULES }}' -split ',' |
+                       ForEach-Object { $_.Trim() } |
+                       Where-Object   { $_ -ne '' })
           $staged = @(Get-Content .changed-files.txt) | ForEach-Object { $_ -replace '\\','/' }
           $stagedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
           $staged | ForEach-Object { [void]$stagedSet.Add($_) }
@@ -106,7 +112,7 @@ jobs:
 
       - name: Upload SARIF report
         if: always() && steps.changed.outputs.count != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: inspectcode-sarif
           path: inspectcode.sarif

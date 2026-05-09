@@ -1,10 +1,13 @@
 #!/usr/bin/env sh
 # Pre-commit hook: runs JetBrains InspectCode on staged .cs files.
-# Best-effort: skipped silently if PowerShell or `jb` is not on PATH.
+# Best-effort: skipped silently if PowerShell is not on PATH. When `jb`
+# is missing but `dotnet` is available, scripts/precommit-inspect.ps1
+# will install JetBrains.ReSharper.GlobalTools as a dotnet global tool
+# automatically (one-time, ~10 MB). Pass -SkipAutoInstall to disable.
 #
 # Bypass in emergencies with: git commit --no-verify
 #
-# One-time setup per clone (installs jb on first use if missing):
+# One-time setup per clone (wires this hook into .git/hooks):
 #   pwsh scripts/setup-hooks.ps1
 
 set -e

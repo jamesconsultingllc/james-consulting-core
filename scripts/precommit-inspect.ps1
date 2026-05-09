@@ -29,10 +29,17 @@ $repoRoot = (& git rev-parse --show-toplevel).Trim()
 Set-Location $repoRoot
 
 if (-not $Solution) {
-    # Auto-detect: prefer src/*.sln (single hit), fall back to root *.sln.
-    $candidates = @(Get-ChildItem -Path 'src' -Filter '*.sln' -File -ErrorAction SilentlyContinue) +
-                  @(Get-ChildItem -Path '.'    -Filter '*.sln' -File -ErrorAction SilentlyContinue)
-    $candidates = @($candidates | Sort-Object FullName -Unique)
+    # Auto-detect: prefer src/*.sln (the canonical layout in this org); only
+    # fall back to a root-level *.sln when src/ has none. Using a flat
+    # sort+first across both folders would let a stray root .sln win even
+    # when src/*.sln exists, which is the opposite of what we want.
+    $srcCandidates  = @(Get-ChildItem -Path 'src' -Filter '*.sln' -File -ErrorAction SilentlyContinue)
+    $rootCandidates = @(Get-ChildItem -Path '.'   -Filter '*.sln' -File -ErrorAction SilentlyContinue)
+    if ($srcCandidates.Count -gt 0) {
+        $candidates = @($srcCandidates | Sort-Object FullName)
+    } else {
+        $candidates = @($rootCandidates | Sort-Object FullName)
+    }
     if ($candidates.Count -eq 0) {
         Write-Warning "pre-commit: no .sln found under src/ or repo root; skipping inspection."
         exit 0
