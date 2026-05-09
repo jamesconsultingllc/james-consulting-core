@@ -43,28 +43,29 @@ if ((Test-Path $hook) -and (-not $IsWindows)) {
     & chmod +x $hook 2>$null
 }
 
-# 3. JetBrains.ReSharper.GlobalTools (`jb`)
+# 3. JetBrains.ReSharper.GlobalTools (`jb`) — pinned via .config/dotnet-tools.json
+#    so every developer + CI runs the exact same InspectCode version.
+#    `dotnet tool restore` is idempotent: it re-uses the existing install when
+#    the manifest version is already present.
 if ($SkipJbInstall) {
-    Write-Host "↷ skipping jb install (-SkipJbInstall)" -ForegroundColor DarkGray
-} elseif (Get-Command jb -ErrorAction SilentlyContinue) {
-    Write-Host "✓ jb already on PATH" -ForegroundColor DarkGray
+    Write-Host "↷ skipping jb restore (-SkipJbInstall)" -ForegroundColor DarkGray
 } elseif (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     Write-Warning "dotnet not found on PATH. Install the .NET SDK then re-run this script."
 } else {
-    Write-Host "↻ installing JetBrains.ReSharper.GlobalTools (one-time)..." -ForegroundColor Yellow
-    & dotnet tool install -g JetBrains.ReSharper.GlobalTools 2>&1 | Out-Host
+    Write-Host "↻ dotnet tool restore (pinned via .config/dotnet-tools.json)..." -ForegroundColor Yellow
+    & dotnet tool restore 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "jb install failed. Run manually: dotnet tool install -g JetBrains.ReSharper.GlobalTools"
+        Write-Warning "dotnet tool restore failed. Run manually: dotnet tool restore"
     } else {
-        $toolsDir = if ($IsWindows) {
-            Join-Path $env:USERPROFILE '.dotnet\tools'
-        } else {
-            Join-Path $HOME '.dotnet/tools'
+        $manifestVersion = $null
+        $manifestPath = Join-Path $repoRoot '.config/dotnet-tools.json'
+        if (Test-Path $manifestPath) {
+            try {
+                $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+                $manifestVersion = $manifest.tools.'jetbrains.resharper.globaltools'.version
+            } catch { }
         }
-        Write-Host "✓ jb installed to $toolsDir" -ForegroundColor Green
-        if (-not (Get-Command jb -ErrorAction SilentlyContinue)) {
-            Write-Warning "Add $toolsDir to your PATH for jb to be discovered in new shells."
-        }
+        Write-Host "✓ jb restored$([string]::IsNullOrEmpty($manifestVersion) ? '' : " (version $manifestVersion)"); invoke as 'dotnet jb' or 'dotnet tool run jb'." -ForegroundColor Green
     }
 }
 

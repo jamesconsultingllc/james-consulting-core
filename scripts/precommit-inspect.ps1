@@ -63,44 +63,70 @@ if (-not $stagedFiles) {
     exit 0
 }
 
-function Ensure-JbOnPath {
-    if (Get-Command jb -ErrorAction SilentlyContinue) { return $true }
+function Ensure-Jb {
+    # Prefer the manifest-pinned local tool (`dotnet jb`) over a globally-
+    # installed `jb`, so the gate runs the exact version recorded in
+    # .config/dotnet-tools.json. Returns a hashtable describing how to invoke
+    # the tool: @{ Command = 'dotnet'|'jb'; Prefix = @('jb') | @() }.
+    $manifest = Join-Path $repoRoot '.config/dotnet-tools.json'
+    if ((Test-Path $manifest) -and (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        if (-not $script:JbRestored) {
+            & dotnet tool restore 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "pre-commit: 'dotnet tool restore' failed; falling back to global jb if present."
+            } else {
+                $script:JbRestored = $true
+            }
+        }
+        if ($script:JbRestored) {
+            return @{ Command = 'dotnet'; Prefix = @('jb') }
+        }
+    }
 
-    # JetBrains.ReSharper.GlobalTools installs to the dotnet tools directory,
-    # which is on PATH by default on most setups but not always in a fresh
-    # shell. Probe the canonical location and prepend it for this run.
+    # Fallback: globally installed `jb` (legacy / user choice).
+    if (Get-Command jb -ErrorAction SilentlyContinue) {
+        return @{ Command = 'jb'; Prefix = @() }
+    }
     $toolsDir = if ($IsWindows) {
         Join-Path $env:USERPROFILE '.dotnet\tools'
     } else {
         Join-Path $HOME '.dotnet/tools'
     }
-    if (Test-Path (Join-Path $toolsDir (if ($IsWindows) { 'jb.exe' } else { 'jb' }))) {
+    $jbBin = Join-Path $toolsDir (if ($IsWindows) { 'jb.exe' } else { 'jb' })
+    if (Test-Path $jbBin) {
         $env:PATH = "$toolsDir$([IO.Path]::PathSeparator)$env:PATH"
-        if (Get-Command jb -ErrorAction SilentlyContinue) { return $true }
+        if (Get-Command jb -ErrorAction SilentlyContinue) {
+            return @{ Command = 'jb'; Prefix = @() }
+        }
     }
-    return $false
+    return $null
 }
 
-if (-not (Ensure-JbOnPath)) {
+$jb = Ensure-Jb
+if ($null -eq $jb) {
     if ($SkipAutoInstall) {
-        Write-Warning "pre-commit: 'jb' not on PATH and -SkipAutoInstall set; skipping inspection."
+        Write-Warning "pre-commit: 'jb' not available and -SkipAutoInstall set; skipping inspection."
         exit 0
     }
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
         Write-Warning "pre-commit: neither 'jb' nor 'dotnet' on PATH; skipping inspection."
-        Write-Warning "Install .NET SDK + 'dotnet tool install -g JetBrains.ReSharper.GlobalTools' to enable."
+        Write-Warning "Install the .NET SDK and run 'dotnet tool restore' from the repo root to enable."
         exit 0
     }
 
-    Write-Host "pre-commit: 'jb' not found, installing JetBrains.ReSharper.GlobalTools (one-time)..." -ForegroundColor Yellow
+    # No manifest + dotnet present — last-resort one-time global install.
+    # The manifest path above is the preferred path; this branch only fires
+    # in repos that haven't (yet) added .config/dotnet-tools.json.
+    Write-Host "pre-commit: 'jb' not found and no tool manifest; installing JetBrains.ReSharper.GlobalTools (one-time)..." -ForegroundColor Yellow
     & dotnet tool install -g JetBrains.ReSharper.GlobalTools 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "pre-commit: auto-install failed; skipping inspection."
         Write-Warning "Run manually: dotnet tool install -g JetBrains.ReSharper.GlobalTools"
         exit 0
     }
-    if (-not (Ensure-JbOnPath)) {
-        Write-Warning "pre-commit: 'jb' still not on PATH after install; skipping inspection."
+    $jb = Ensure-Jb
+    if ($null -eq $jb) {
+        Write-Warning "pre-commit: 'jb' still not available after install; skipping inspection."
         Write-Warning "Add `$HOME/.dotnet/tools (or %USERPROFILE%\.dotnet\tools) to PATH and retry."
         exit 0
     }
@@ -115,6 +141,7 @@ $reportPath = Join-Path ([IO.Path]::GetTempPath()) "precommit-inspect-$([Guid]::
 $includeMask = ($stagedFiles | ForEach-Object { "**/" + (Split-Path $_ -Leaf) } | Sort-Object -Unique) -join ';'
 
 $jbArgs = @(
+    'inspectcode',
     $Solution,
     "--output=$reportPath",
     "--include=$includeMask",
@@ -123,16 +150,36 @@ $jbArgs = @(
 )
 
 $sw = [Diagnostics.Stopwatch]::StartNew()
-& jb inspectcode @jbArgs | Out-Null
+$invokeArgs = $jb.Prefix + $jbArgs
+& $jb.Command @invokeArgs | Out-Null
 $jbExit = $LASTEXITCODE
 $sw.Stop()
 Write-Host "pre-commit: inspection finished in $([int]$sw.Elapsed.TotalSeconds)s." -ForegroundColor DarkGray
 
+# Build a copy/paste-safe rerun command. Quote any arg that contains whitespace
+# or shell metacharacters so the temp SARIF path (and any other surprising
+# value) round-trips correctly.
+function Format-ShellArg {
+    param([Parameter(Mandatory)][string]$Value)
+    # Quote any value containing whitespace or shell metacharacters so the
+    # temp SARIF path (and other surprising values) round-trip correctly.
+    # Build the metachar list in a char-class via [regex] to avoid quote-
+    # escaping headaches inside a PowerShell string literal.
+    $needsQuoting = [regex]::IsMatch($Value, '[\s"\\$`!()*?\[\]{}|<>;&#~'']')
+    if (-not $needsQuoting) { return $Value }
+    # Prefer single quotes; if the value contains one, fall back to double
+    # quoting with backtick-escaped specials.
+    if ($Value -notmatch "'") { return "'" + $Value + "'" }
+    return '"' + ($Value -replace '([\\"`$])','`$1') + '"'
+}
+$rerunParts = @($jb.Command) + $jb.Prefix + $jbArgs
+$rerunCmd = ($rerunParts | ForEach-Object { Format-ShellArg $_ }) -join ' '
+
 if ($jbExit -ne 0) {
     Write-Host "" -ForegroundColor Red
-    Write-Host "pre-commit: 'jb inspectcode' exited with code $jbExit (restore/build/tool failure)." -ForegroundColor Red
+    Write-Host "pre-commit: '$($jb.Command) $($jb.Prefix -join ' ') inspectcode' exited with code $jbExit (restore/build/tool failure)." -ForegroundColor Red
     Write-Host "  Re-run manually to see the full output:" -ForegroundColor Yellow
-    Write-Host "    jb inspectcode $($jbArgs -join ' ')" -ForegroundColor Yellow
+    Write-Host "    $rerunCmd" -ForegroundColor Yellow
     Write-Host "  Bypass with: git commit --no-verify" -ForegroundColor Yellow
     exit 1
 }

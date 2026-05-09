@@ -12,6 +12,7 @@ on:
       - 'src/Directory.Build.props'
       - 'src/Directory.Build.targets'
       - '.editorconfig'
+      - '.config/dotnet-tools.json'
       - '.github/workflows/code-inspection.yml'
       - 'scripts/precommit-inspect.ps1'
 
@@ -45,32 +46,50 @@ jobs:
       - name: Restore solution
         run: dotnet restore ${{ env.SOLUTION }}
 
-      - name: Install JetBrains InspectCode
-        run: dotnet tool install -g JetBrains.ReSharper.GlobalTools
+      - name: Restore .NET tools (pinned via .config/dotnet-tools.json)
+        # Manifest pins jb to a specific version so CI and dev machines run
+        # the exact same InspectCode build. Bump the manifest intentionally
+        # to upgrade.
+        run: dotnet tool restore
 
       - name: Determine changed .cs files
         id: changed
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
-          files=$(git diff --name-only --diff-filter=ACMR "$base" "$head" | grep -E '\.cs$' || true)
-          if [ -z "$files" ]; then
+          # NUL-delimit so paths containing whitespace, quotes, or other shell
+          # metacharacters survive intact (basenames in particular).
+          mapfile -d '' files < <(git diff --name-only --diff-filter=ACMR -z "$base" "$head" |
+                                  awk -v RS='\0' -v ORS='\0' '/\.cs$/')
+          if [ "${#files[@]}" -eq 0 ]; then
             echo "No .cs files changed — skipping inspection."
             echo "count=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-          mask=$(printf '%s\n' "$files" | xargs -n1 basename | sort -u | sed 's#^#**/#' | paste -sd ';' -)
+          echo "count=${#files[@]}" >> "$GITHUB_OUTPUT"
+          # Build the InspectCode --include mask from de-duplicated basenames.
+          # We loop instead of piping to xargs because xargs splits on any
+          # whitespace and would corrupt paths containing spaces/quotes.
+          declare -A seen=()
+          mask=''
+          for f in "${files[@]}"; do
+            b="$(basename -- "$f")"
+            if [ -z "${seen[$b]:-}" ]; then
+              seen[$b]=1
+              if [ -z "$mask" ]; then mask="**/$b"; else mask="$mask;**/$b"; fi
+            fi
+          done
           echo "mask=$mask" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$files" > .changed-files.txt
+          # Persist the original NUL-delimited list so the report step gets
+          # exact paths (no whitespace re-splitting).
+          printf '%s\0' "${files[@]}" > .changed-files.nul
 
       - name: Run InspectCode
         if: steps.changed.outputs.count != '0'
         run: |
-          jb inspectcode "${{ env.SOLUTION }}" \
+          dotnet jb inspectcode "${{ env.SOLUTION }}" \
             --output=inspectcode.sarif \
             --include="${{ steps.changed.outputs.mask }}" \
             --no-build \
@@ -87,7 +106,13 @@ jobs:
           $ignored = @('${{ env.IGNORED_RULES }}' -split ',' |
                        ForEach-Object { $_.Trim() } |
                        Where-Object   { $_ -ne '' })
-          $staged = @(Get-Content .changed-files.txt) | ForEach-Object { $_ -replace '\\','/' }
+          # Read the NUL-delimited changed-files list — paths may contain
+          # whitespace or quotes that would not survive newline splitting.
+          $stagedRaw = if (Test-Path .changed-files.nul) {
+              [System.IO.File]::ReadAllText('.changed-files.nul') -split "`0" |
+                  Where-Object { $_ -ne '' }
+          } else { @() }
+          $staged = @($stagedRaw | ForEach-Object { $_ -replace '\\','/' })
           $stagedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
           $staged | ForEach-Object { [void]$stagedSet.Add($_) }
 
@@ -129,22 +154,27 @@ jobs:
             exit 0
           }
 
-          # Escape GitHub workflow-command special chars (%, CR, LF, :) in the
-          # message so SARIF text can't break ::error parsing or inject
-          # workflow commands. Per docs:
+          # Escape GitHub workflow-command special chars in the message + property
+          # values so SARIF text can't break ::error parsing or inject workflow
+          # commands. Per docs, message data needs %, CR, LF escapes; property
+          # values (file/line/title) additionally need ',' and ':' escapes.
           # https://docs.github.com/en/actions/learn-github-actions/workflow-commands-for-github-actions#example-escaping-data
-          function Escape-WorkflowData {
+          function Escape-WorkflowMessage {
             param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
-            return ($Value -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A' -replace ':','%3A')
+            return ($Value -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A')
+          }
+          function Escape-WorkflowProperty {
+            param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+            return ((Escape-WorkflowMessage $Value) -replace ':','%3A' -replace ',','%2C')
           }
 
           Write-Host "::error::$($failures.Count) blocking inspection issue(s) in changed files:"
           foreach ($f in $failures) {
             $loc = $f.locations[0].physicalLocation
-            $file = Normalize-SarifUri $loc.artifactLocation.uri
+            $file = Escape-WorkflowProperty (Normalize-SarifUri $loc.artifactLocation.uri)
             $line = $loc.region.startLine
-            $msg  = Escape-WorkflowData ($f.message.text)
-            $rule = Escape-WorkflowData ($f.ruleId)
+            $msg  = Escape-WorkflowMessage  ($f.message.text)
+            $rule = Escape-WorkflowProperty ($f.ruleId)
             Write-Host ("::error file={0},line={1},title={2}::{3}" -f $file, $line, $rule, $msg)
           }
           exit 1
