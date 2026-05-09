@@ -25,7 +25,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (& git rev-parse --show-toplevel).Trim()
+$repoRootRaw = & git rev-parse --show-toplevel 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRootRaw)) {
+    Write-Warning "pre-commit: not inside a git repo; skipping inspection."
+    exit 0
+}
+$repoRoot = $repoRootRaw.Trim()
 Set-Location $repoRoot
 
 if (-not $Solution) {
@@ -119,12 +124,24 @@ $jbArgs = @(
 
 $sw = [Diagnostics.Stopwatch]::StartNew()
 & jb inspectcode @jbArgs | Out-Null
+$jbExit = $LASTEXITCODE
 $sw.Stop()
 Write-Host "pre-commit: inspection finished in $([int]$sw.Elapsed.TotalSeconds)s." -ForegroundColor DarkGray
 
+if ($jbExit -ne 0) {
+    Write-Host "" -ForegroundColor Red
+    Write-Host "pre-commit: 'jb inspectcode' exited with code $jbExit (restore/build/tool failure)." -ForegroundColor Red
+    Write-Host "  Re-run manually to see the full output:" -ForegroundColor Yellow
+    Write-Host "    jb inspectcode $($jbArgs -join ' ')" -ForegroundColor Yellow
+    Write-Host "  Bypass with: git commit --no-verify" -ForegroundColor Yellow
+    exit 1
+}
+
 if (-not (Test-Path $reportPath)) {
-    Write-Warning "pre-commit: InspectCode did not produce a report; allowing commit."
-    exit 0
+    Write-Host "pre-commit: 'jb inspectcode' returned 0 but produced no report at $reportPath." -ForegroundColor Red
+    Write-Host "  This usually means the include mask matched no files in the solution." -ForegroundColor Yellow
+    Write-Host "  Bypass with: git commit --no-verify" -ForegroundColor Yellow
+    exit 1
 }
 
 $stagedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)

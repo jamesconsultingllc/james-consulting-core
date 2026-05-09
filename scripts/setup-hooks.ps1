@@ -20,11 +20,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (& git rev-parse --show-toplevel 2>$null).Trim()
-if (-not $repoRoot) {
+$repoRootRaw = & git rev-parse --show-toplevel 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRootRaw)) {
     Write-Error "setup-hooks: not inside a git repo."
     exit 1
 }
+$repoRoot = $repoRootRaw.Trim()
 Set-Location $repoRoot
 
 # 1. core.hooksPath -> .githooks
