@@ -18,10 +18,14 @@ set -e
 
 if command -v pwsh >/dev/null 2>&1; then
   PS="pwsh"
-elif command -v powershell >/dev/null 2>&1; then
-  PS="powershell"
 else
-  echo "pre-commit: neither 'pwsh' nor 'powershell' found on PATH; skipping hooks" >&2
+  # We intentionally do NOT fall back to Windows PowerShell 5.1 here:
+  # scripts/precommit-inspect.ps1 relies on PowerShell 7+ features
+  # ($IsWindows automatic variable, ternary, etc.). Falling back to
+  # `powershell` on a machine without `pwsh` would surface as a parse
+  # error and block commits instead of skipping cleanly.
+  echo "pre-commit: 'pwsh' (PowerShell 7+) not found on PATH; skipping hooks" >&2
+  echo "pre-commit:   install with: winget install Microsoft.PowerShell  (Windows) /  brew install powershell  (macOS) /  see https://aka.ms/powershell" >&2
   exit 0
 fi
 
