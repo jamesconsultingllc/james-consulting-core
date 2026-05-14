@@ -148,11 +148,44 @@ if ($null -eq $jb) {
 
 Write-Host "pre-commit: inspecting $($stagedFiles.Count) staged .cs file(s)..." -ForegroundColor Cyan
 
+# The hook must inspect the exact content being committed (the index), not
+# the working tree. If a developer has unstaged edits in a staged file, a
+# working-tree inspection would either fail the commit on code that is not
+# being committed, or — worse — pass after an unstaged fix while committing
+# the still-broken staged version. Stash unstaged changes (and untracked
+# files) with --keep-index so the working tree matches the index for the
+# duration of the inspection, then restore afterward in `finally`.
+#
+# Detect a no-op stash by comparing refs/stash before and after: an actual
+# stash entry advances that ref, while "nothing to stash" leaves it (or its
+# absence) untouched. Without this we would `stash pop` someone else's
+# previously-stashed work and corrupt their tree.
+$preStashSha = (& git rev-parse --verify --quiet refs/stash 2>$null)
+& git stash push --keep-index --include-untracked --quiet -m 'precommit-inspect: working-tree snapshot' 2>$null | Out-Null
+$postStashSha = (& git rev-parse --verify --quiet refs/stash 2>$null)
+$stashed = ($postStashSha -and ($postStashSha -ne $preStashSha))
+
 $reportPath = Join-Path ([IO.Path]::GetTempPath()) "precommit-inspect-$([Guid]::NewGuid()).sarif"
 # Mirror to $script: so Remove-Report (which references $script:reportPath) can
 # actually find and delete the temp SARIF file on every exit path. Without this
 # the function's $script:reportPath would be $null and the temp file would leak.
 $script:reportPath = $reportPath
+
+# Helper invoked before every `exit` below — PowerShell `exit` skips `finally`,
+# so we explicitly run cleanup before each terminal path. Restores unstaged
+# edits + untracked files that we stashed above so the developer's working
+# tree survives the inspection (success or failure) intact.
+function Restore-WorkingTree {
+    if ($script:stashed) {
+        & git stash pop --quiet 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "pre-commit: 'git stash pop' failed — your unstaged changes are still in the stash."
+            Write-Warning "  Recover with: git stash list ; git stash pop"
+        }
+        $script:stashed = $false
+    }
+}
+$script:stashed = $stashed
 
 # --include uses file-name wildcards; we use **/<leaf> so patterns match the solution layout.
 $includeMask = ($stagedFiles | ForEach-Object { "**/" + (Split-Path $_ -Leaf) } | Sort-Object -Unique) -join ';'
@@ -176,10 +209,13 @@ Write-Host "pre-commit: inspection finished in $([int]$sw.Elapsed.TotalSeconds)s
 # Helper so the temp SARIF file is removed on every exit path — success,
 # parse error, jb failure, or missing report. PowerShell `exit` skips
 # enclosing `finally` blocks, so we explicitly cleanup before each `exit`.
+# Also restores any working-tree stash we created earlier, since every
+# `Remove-Report` site is downstream of the stash point.
 function Remove-Report {
     if ($script:reportPath -and (Test-Path $script:reportPath)) {
         Remove-Item $script:reportPath -Force -ErrorAction SilentlyContinue
     }
+    Restore-WorkingTree
 }
 
 # Build a copy/paste-safe rerun command. Quote any arg that contains whitespace
@@ -289,6 +325,7 @@ $failures = @($results | Where-Object {
     })
 
 if ($failures.Count -eq 0) {
+    Restore-WorkingTree
     Write-Host "pre-commit: no blocking issues in staged files. ✔" -ForegroundColor Green
     exit 0
 }
@@ -306,4 +343,5 @@ $failures | Sort-Object { $_.locations[0].physicalLocation.artifactLocation.uri 
 
 Write-Host ""
 Write-Host "Fix the issues above and re-stage, or bypass with: git commit --no-verify" -ForegroundColor Yellow
+Restore-WorkingTree
 exit 1

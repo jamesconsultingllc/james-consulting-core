@@ -52,11 +52,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Three-dot range (base...head) limits the diff to files actually
+          # changed on the PR branch relative to the merge-base, ignoring
+          # files that only moved on the base branch since the PR diverged.
+          # A two-dot range would surface unrelated base-branch churn and
+          # could fail the gate on files this PR never touched.
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
           # NUL-delimit so paths containing whitespace, quotes, or other shell
           # metacharacters survive intact (basenames in particular).
-          mapfile -d '' files < <(git diff --name-only --diff-filter=ACMR -z "$base" "$head" |
+          mapfile -d '' files < <(git diff --name-only --diff-filter=ACMR -z "$base...$head" |
                                   awk -v RS='\0' -v ORS='\0' '/\.cs$/')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No .cs files changed — skipping inspection."
