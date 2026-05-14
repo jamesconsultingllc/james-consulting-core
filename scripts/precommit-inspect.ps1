@@ -127,6 +127,20 @@ if ($null -eq $jb) {
         exit 0
     }
 
+    # If a manifest exists, the pinned tool is the source of truth. Falling
+    # back to a global install would silently swap the developer onto a
+    # different (likely newer) InspectCode build than CI, defeating the
+    # whole point of pinning. Fail-soft (skip) and surface the restore
+    # error so the developer can fix it deliberately.
+    $manifest = Join-Path $repoRoot '.config/dotnet-tools.json'
+    if (Test-Path $manifest) {
+        Write-Warning "pre-commit: tool manifest exists at .config/dotnet-tools.json but 'dotnet tool restore' failed."
+        Write-Warning "  Not falling back to a global install — that would diverge from the pinned version used by CI."
+        Write-Warning "  Run manually to diagnose: dotnet tool restore"
+        Write-Warning "  Bypass in an emergency with: git commit --no-verify"
+        exit 0
+    }
+
     # No manifest + dotnet present — last-resort one-time global install.
     # The manifest path above is the preferred path; this branch only fires
     # in repos that haven't (yet) added .config/dotnet-tools.json.

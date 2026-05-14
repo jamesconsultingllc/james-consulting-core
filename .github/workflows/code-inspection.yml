@@ -19,7 +19,10 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  actions: write   # actions/upload-artifact@v4 uses the Actions API to create artifact records.
+  # actions/upload-artifact@v4 uploads via the Actions runtime artifact
+  # service and does NOT require `actions: write` on the GITHUB_TOKEN.
+  # Keep this workflow's GITHUB_TOKEN read-only so PR code cannot perform
+  # write-scoped Actions API operations via the workflow.
 
 env:
   SOLUTION: 'src/JamesConsulting.sln'
