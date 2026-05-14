@@ -206,7 +206,23 @@ function Restore-WorkingTree {
 }
 $script:stashed = $stashed
 
-# --include uses file-name wildcards; we use **/<leaf> so patterns match the solution layout.
+# --include uses file-name wildcards; we use **/<leaf> so patterns match the
+# solution layout. The mask is semicolon-delimited, so a basename containing
+# `;` would silently split into multiple bogus masks and the real file would
+# never be inspected — a quiet bypass of the pre-commit gate. Git permits
+# `;` in path names; fail closed (don't try to be clever) when a staged
+# basename contains a separator we can't escape.
+$badSep = @($stagedFiles | Where-Object { (Split-Path $_ -Leaf) -match ';' })
+if ($badSep.Count -gt 0) {
+    Restore-WorkingTree
+    Write-Host ""
+    Write-Host "pre-commit: refusing to inspect — staged filename contains ';' which is the InspectCode --include separator:" -ForegroundColor Red
+    $badSep | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    Write-Host ""
+    Write-Host "  Rename the file (or commit it under a different name) and re-stage." -ForegroundColor Yellow
+    Write-Host "  Bypass in an emergency with: git commit --no-verify" -ForegroundColor Yellow
+    exit 1
+}
 $includeMask = ($stagedFiles | ForEach-Object { "**/" + (Split-Path $_ -Leaf) } | Sort-Object -Unique) -join ';'
 
 $jbArgs = @(

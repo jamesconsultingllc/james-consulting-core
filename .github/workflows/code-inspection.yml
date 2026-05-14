@@ -66,18 +66,26 @@ jobs:
           # metacharacters survive intact (basenames in particular).
           mapfile -d '' files < <(git diff --name-only --diff-filter=ACMR -z "$base...$head" |
                                   awk -v RS='\0' -v ORS='\0' '/\.cs$/')
-          # Reject CR/LF in any changed filename before we write to
-          # GITHUB_OUTPUT. Git permits newlines in paths, and a single-line
-          # `echo "mask=..." >> $GITHUB_OUTPUT` would otherwise let a crafted
-          # filename inject additional output records (e.g. override `count`
-          # or `mask`) and bypass or alter the inspection gate. Fail closed
-          # instead of trying to be clever — nobody legitimately checks in
-          # a .cs file whose name contains a newline.
+          # Reject CR/LF or ';' in any changed filename before we write to
+          # GITHUB_OUTPUT. Git permits newlines and semicolons in paths.
+          # CR/LF would let a crafted filename inject extra output records
+          # (e.g. override `count` or `mask`) and bypass the gate. ';' is
+          # the InspectCode --include separator, so a basename containing
+          # ';' would silently split into multiple bogus masks and the real
+          # file would never be inspected — a quiet bypass of CI. Fail
+          # closed instead of trying to be clever — nobody legitimately
+          # checks in a .cs file whose name contains a newline or ';'.
           for f in "${files[@]}"; do
             case "$f" in
               *$'\n'*|*$'\r'*)
                 echo "::error::Refusing to inspect: changed filename contains CR/LF, which would corrupt GITHUB_OUTPUT." >&2
                 printf '::error::offending path (octal): %s\n' "$(printf '%s' "$f" | od -An -c | tr -s ' ')" >&2
+                exit 1
+                ;;
+            esac
+            case "$(basename -- "$f")" in
+              *';'*)
+                echo "::error::Refusing to inspect: changed filename basename contains ';' (the InspectCode --include separator): $f" >&2
                 exit 1
                 ;;
             esac
