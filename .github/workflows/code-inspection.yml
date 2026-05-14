@@ -66,6 +66,22 @@ jobs:
           # metacharacters survive intact (basenames in particular).
           mapfile -d '' files < <(git diff --name-only --diff-filter=ACMR -z "$base...$head" |
                                   awk -v RS='\0' -v ORS='\0' '/\.cs$/')
+          # Reject CR/LF in any changed filename before we write to
+          # GITHUB_OUTPUT. Git permits newlines in paths, and a single-line
+          # `echo "mask=..." >> $GITHUB_OUTPUT` would otherwise let a crafted
+          # filename inject additional output records (e.g. override `count`
+          # or `mask`) and bypass or alter the inspection gate. Fail closed
+          # instead of trying to be clever — nobody legitimately checks in
+          # a .cs file whose name contains a newline.
+          for f in "${files[@]}"; do
+            case "$f" in
+              *$'\n'*|*$'\r'*)
+                echo "::error::Refusing to inspect: changed filename contains CR/LF, which would corrupt GITHUB_OUTPUT." >&2
+                printf '::error::offending path (octal): %s\n' "$(printf '%s' "$f" | od -An -c | tr -s ' ')" >&2
+                exit 1
+                ;;
+            esac
+          done
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No .cs files changed — skipping inspection."
             echo "count=0" >> "$GITHUB_OUTPUT"
