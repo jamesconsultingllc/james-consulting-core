@@ -43,15 +43,10 @@ jobs:
             9.0.x
             10.0.x
 
-      - name: Restore solution
-        run: dotnet restore ${{ env.SOLUTION }}
-
-      - name: Restore .NET tools (pinned via .config/dotnet-tools.json)
-        # Manifest pins jb to a specific version so CI and dev machines run
-        # the exact same InspectCode build. Bump the manifest intentionally
-        # to upgrade.
-        run: dotnet tool restore
-
+      # Determine changed .cs files FIRST so we can short-circuit the
+      # rest of the job when a PR only touches non-.cs paths
+      # (e.g. .editorconfig, the workflow itself, tool manifest). Restore
+      # + tool restore + InspectCode are all gated on count != '0' below.
       - name: Determine changed .cs files
         id: changed
         shell: bash
@@ -86,6 +81,17 @@ jobs:
           # exact paths (no whitespace re-splitting).
           printf '%s\0' "${files[@]}" > .changed-files.nul
 
+      - name: Restore solution
+        if: steps.changed.outputs.count != '0'
+        run: dotnet restore ${{ env.SOLUTION }}
+
+      - name: Restore .NET tools (pinned via .config/dotnet-tools.json)
+        if: steps.changed.outputs.count != '0'
+        # Manifest pins jb to a specific version so CI and dev machines run
+        # the exact same InspectCode build. Bump the manifest intentionally
+        # to upgrade.
+        run: dotnet tool restore
+
       - name: Run InspectCode
         if: steps.changed.outputs.count != '0'
         run: |
@@ -99,6 +105,25 @@ jobs:
         if: steps.changed.outputs.count != '0'
         shell: pwsh
         run: |
+          # Defend against the prior step exiting 0 without producing a SARIF
+          # report (e.g. include mask matched nothing, jb writing was aborted
+          # mid-run, or a partial/zero-byte file). Without this, a missing or
+          # empty inspectcode.sarif would surface as a generic Get-Content /
+          # ConvertFrom-Json failure that's hard to diagnose from CI logs.
+          if (-not (Test-Path inspectcode.sarif)) {
+              Write-Host "::error::InspectCode produced no SARIF report at inspectcode.sarif."
+              Write-Host "::error::Rerun locally to investigate:"
+              Write-Host "::error::  dotnet jb inspectcode '${{ env.SOLUTION }}' --output=inspectcode.sarif --include='${{ steps.changed.outputs.mask }}' --no-build --verbosity=WARN"
+              exit 1
+          }
+          $sarifInfo = Get-Item inspectcode.sarif
+          if ($sarifInfo.Length -eq 0) {
+              Write-Host "::error::InspectCode produced an empty SARIF report at inspectcode.sarif (0 bytes)."
+              Write-Host "::error::Rerun locally to investigate:"
+              Write-Host "::error::  dotnet jb inspectcode '${{ env.SOLUTION }}' --output=inspectcode.sarif --include='${{ steps.changed.outputs.mask }}' --no-build --verbosity=WARN"
+              exit 1
+          }
+
           # Trim each entry and drop empties so values like "IDE0005, CA1822" or
           # a stray trailing comma still produce clean rule IDs that match the
           # SARIF results. Without this, " CA1822" (leading space) would never
@@ -117,7 +142,14 @@ jobs:
               ($IsWindows ? [StringComparer]::OrdinalIgnoreCase : [StringComparer]::Ordinal))
           $staged | ForEach-Object { [void]$stagedSet.Add($_) }
 
-          $sarif = Get-Content inspectcode.sarif -Raw | ConvertFrom-Json
+          try {
+              $sarif = Get-Content inspectcode.sarif -Raw | ConvertFrom-Json
+          } catch {
+              Write-Host "::error::Failed to parse inspectcode.sarif as JSON: $($_.Exception.Message)"
+              Write-Host "::error::Rerun locally to investigate:"
+              Write-Host "::error::  dotnet jb inspectcode '${{ env.SOLUTION }}' --output=inspectcode.sarif --include='${{ steps.changed.outputs.mask }}' --no-build --verbosity=WARN"
+              exit 1
+          }
 
           # Normalize SARIF artifactLocation.uri — may be repo-relative POSIX,
           # absolute, file:// URI, or './'-prefixed. Without this, real

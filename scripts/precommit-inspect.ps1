@@ -149,6 +149,10 @@ if ($null -eq $jb) {
 Write-Host "pre-commit: inspecting $($stagedFiles.Count) staged .cs file(s)..." -ForegroundColor Cyan
 
 $reportPath = Join-Path ([IO.Path]::GetTempPath()) "precommit-inspect-$([Guid]::NewGuid()).sarif"
+# Mirror to $script: so Remove-Report (which references $script:reportPath) can
+# actually find and delete the temp SARIF file on every exit path. Without this
+# the function's $script:reportPath would be $null and the temp file would leak.
+$script:reportPath = $reportPath
 
 # --include uses file-name wildcards; we use **/<leaf> so patterns match the solution layout.
 $includeMask = ($stagedFiles | ForEach-Object { "**/" + (Split-Path $_ -Leaf) } | Sort-Object -Unique) -join ';'
