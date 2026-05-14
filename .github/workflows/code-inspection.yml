@@ -102,16 +102,31 @@ jobs:
 
       - name: Run InspectCode
         if: steps.changed.outputs.count != '0'
+        # PR-controlled file names flow into the include mask. Pass the mask
+        # and solution via env vars (which run scripts see as plain shell
+        # variables) instead of interpolating the GitHub expression directly
+        # into the script body — a file name containing quotes or command
+        # substitution could otherwise break out of the quoted argument and
+        # execute arbitrary commands on the runner.
+        env:
+          INCLUDE_MASK: ${{ steps.changed.outputs.mask }}
+          SOLUTION: ${{ env.SOLUTION }}
         run: |
-          dotnet jb inspectcode "${{ env.SOLUTION }}" \
+          dotnet jb inspectcode "$SOLUTION" \
             --output=inspectcode.sarif \
-            --include="${{ steps.changed.outputs.mask }}" \
+            --include="$INCLUDE_MASK" \
             --no-build \
             --verbosity=WARN
 
       - name: Report issues
         if: steps.changed.outputs.count != '0'
         shell: pwsh
+        # Same defense as Run InspectCode: never interpolate PR-controlled
+        # values directly into the run script. The pwsh body reads them via
+        # $env: so any quoting/escaping is the shell's problem, not ours.
+        env:
+          INCLUDE_MASK: ${{ steps.changed.outputs.mask }}
+          SOLUTION: ${{ env.SOLUTION }}
         run: |
           # Defend against the prior step exiting 0 without producing a SARIF
           # report (e.g. include mask matched nothing, jb writing was aborted
@@ -121,14 +136,14 @@ jobs:
           if (-not (Test-Path inspectcode.sarif)) {
               Write-Host "::error::InspectCode produced no SARIF report at inspectcode.sarif."
               Write-Host "::error::Rerun locally to investigate:"
-              Write-Host "::error::  dotnet jb inspectcode '${{ env.SOLUTION }}' --output=inspectcode.sarif --include='${{ steps.changed.outputs.mask }}' --no-build --verbosity=WARN"
+              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
               exit 1
           }
           $sarifInfo = Get-Item inspectcode.sarif
           if ($sarifInfo.Length -eq 0) {
               Write-Host "::error::InspectCode produced an empty SARIF report at inspectcode.sarif (0 bytes)."
               Write-Host "::error::Rerun locally to investigate:"
-              Write-Host "::error::  dotnet jb inspectcode '${{ env.SOLUTION }}' --output=inspectcode.sarif --include='${{ steps.changed.outputs.mask }}' --no-build --verbosity=WARN"
+              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
               exit 1
           }
 
@@ -155,7 +170,7 @@ jobs:
           } catch {
               Write-Host "::error::Failed to parse inspectcode.sarif as JSON: $($_.Exception.Message)"
               Write-Host "::error::Rerun locally to investigate:"
-              Write-Host "::error::  dotnet jb inspectcode '${{ env.SOLUTION }}' --output=inspectcode.sarif --include='${{ steps.changed.outputs.mask }}' --no-build --verbosity=WARN"
+              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
               exit 1
           }
 

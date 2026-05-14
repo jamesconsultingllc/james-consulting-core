@@ -81,22 +81,27 @@ function Ensure-Jb {
     # installed `jb`, so the gate runs the exact version recorded in
     # .config/dotnet-tools.json. Returns a hashtable describing how to invoke
     # the tool: @{ Command = 'dotnet'|'jb'; Prefix = @('jb') | @() }.
+    #
+    # When a manifest is present but `dotnet tool restore` fails, we MUST
+    # return $null instead of falling through to a globally-installed `jb`.
+    # Otherwise the gate would silently run a different (likely newer)
+    # InspectCode build than CI, defeating the pin. The fail-soft branch
+    # below (which fires on $null return) surfaces the restore error so
+    # the developer can fix it deliberately.
     $manifest = Join-Path $repoRoot '.config/dotnet-tools.json'
     if ((Test-Path $manifest) -and (Get-Command dotnet -ErrorAction SilentlyContinue)) {
         if (-not $script:JbRestored) {
             & dotnet tool restore 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Warning "pre-commit: 'dotnet tool restore' failed; falling back to global jb if present."
-            } else {
-                $script:JbRestored = $true
+                Write-Warning "pre-commit: 'dotnet tool restore' failed; not falling back to global jb (manifest pin takes precedence)."
+                return $null
             }
+            $script:JbRestored = $true
         }
-        if ($script:JbRestored) {
-            return @{ Command = 'dotnet'; Prefix = @('jb') }
-        }
+        return @{ Command = 'dotnet'; Prefix = @('jb') }
     }
 
-    # Fallback: globally installed `jb` (legacy / user choice).
+    # No manifest — fall back to a globally-installed `jb` (legacy / user choice).
     if (Get-Command jb -ErrorAction SilentlyContinue) {
         return @{ Command = 'jb'; Prefix = @() }
     }
