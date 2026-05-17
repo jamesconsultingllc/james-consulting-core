@@ -130,14 +130,20 @@ function Ensure-Jb {
     # .config/dotnet-tools.json. Returns a hashtable describing how to invoke
     # the tool: @{ Command = 'dotnet'|'jb'; Prefix = @('jb') | @() }.
     #
-    # When a manifest is present but `dotnet tool restore` fails, we MUST
-    # return $null instead of falling through to a globally-installed `jb`.
-    # Otherwise the gate would silently run a different (likely newer)
+    # When a manifest is present the manifest pin is authoritative. If
+    # `dotnet` is missing or `dotnet tool restore` fails, we MUST return
+    # $null instead of falling through to a globally-installed `jb` —
+    # otherwise the gate would silently run a different (likely newer)
     # InspectCode build than CI, defeating the pin. The fail-soft branch
-    # below (which fires on $null return) surfaces the restore error so
-    # the developer can fix it deliberately.
+    # below (which fires on $null return) surfaces the error so the
+    # developer can fix it deliberately.
     $manifest = Join-Path $repoRoot '.config/dotnet-tools.json'
-    if ((Test-Path $manifest) -and (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+    if (Test-Path $manifest) {
+        if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+            Write-Warning "pre-commit: '.config/dotnet-tools.json' exists but 'dotnet' is not on PATH; not falling back to global jb (manifest pin takes precedence)."
+            Write-Warning "  Install the .NET SDK from https://aka.ms/dotnet/download and retry."
+            return $null
+        }
         if (-not $script:JbRestored) {
             & dotnet tool restore 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
