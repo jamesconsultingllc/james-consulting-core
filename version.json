@@ -15,6 +15,6 @@
     }
   },
   "nugetPackageVersion": {
-    "semVer1NumericIdentifierPadding": 0
+    "semVer": 2
   }
 }
