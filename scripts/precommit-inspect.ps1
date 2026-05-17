@@ -404,12 +404,26 @@ function Normalize-SarifUri {
     # file:// URIs need [System.Uri] parsing to handle Windows-form
     # `file:///C:/repo/...` correctly. A naive `^file:/{2,3}` -> '/'
     # replace would yield '/C:/repo/...' which would never match
-    # $repoRootPosix on Windows.
+    # $repoRootPosix on Windows. [System.Uri].LocalPath also handles
+    # percent-decoding for us.
     if ($u -match '^file:') {
         try {
             $u = ([System.Uri]$u).LocalPath
         } catch {
             $u = $u -replace '^file:/{2,3}', ''
+            $u = [System.Uri]::UnescapeDataString($u)
+        }
+    } else {
+        # Non-file SARIF URIs are still URIs — relative paths containing
+        # spaces or other URI-reserved characters are percent-encoded
+        # (e.g. `src/My%20File.cs`). The staged set stores raw git paths,
+        # so without decoding here those findings would never match and
+        # the gate would let blocking warnings through.
+        try {
+            $u = [System.Uri]::UnescapeDataString($u)
+        } catch {
+            # Leave $u as-is on the (very unlikely) decode failure;
+            # downstream membership check just won't match.
         }
     }
     $u = $u -replace '\\', '/'

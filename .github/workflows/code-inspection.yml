@@ -230,11 +230,24 @@ jobs:
             # file:// URIs need [System.Uri] parsing to handle Windows-form
             # `file:///C:/...` correctly (a naive scheme strip would leave
             # `/C:/...` which never matches the workspace root).
+            # [System.Uri].LocalPath also percent-decodes for us.
             if ($u -match '^file:') {
               try {
                 $u = ([System.Uri]$u).LocalPath
               } catch {
                 $u = $u -replace '^file:/{2,3}', ''
+                $u = [System.Uri]::UnescapeDataString($u)
+              }
+            } else {
+              # Non-file SARIF URIs are still URIs — relative paths with
+              # spaces or other URI-reserved characters are percent-encoded
+              # (e.g. `src/My%20File.cs`). The staged set stores raw git
+              # paths, so without decoding here those findings would never
+              # match $stagedSet and CI would miss blocking issues.
+              try {
+                $u = [System.Uri]::UnescapeDataString($u)
+              } catch {
+                # Leave $u as-is on the (very unlikely) decode failure.
               }
             }
             $u = $u -replace '\\','/'
