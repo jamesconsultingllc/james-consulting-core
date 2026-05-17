@@ -71,13 +71,32 @@ if (-not $Solution) {
 # explicitly before further processing — the rest of the script (include
 # mask, staged-set membership, error messages) cannot represent CR/LF
 # safely, so fail closed in that case.
-$gitOutput = & git diff --cached -z --name-only --diff-filter=ACMR
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "pre-commit: 'git diff --cached' failed (exit $LASTEXITCODE); skipping inspection." -ForegroundColor Red
-    exit 1
+#
+# We MUST capture git's stdout as raw bytes, not via `&` invocation:
+# PowerShell's native-command capture is line-oriented and splits on
+# newlines before we can split on NUL, so a `\n` inside a single staged
+# path would corrupt the array (one logical path becomes two array
+# entries) and the CR/LF check below would not see it. Redirect to a
+# temp file via `Start-Process`, then read the file as bytes — that
+# preserves NUL terminators and embedded newlines verbatim.
+$diffTempFile = Join-Path ([IO.Path]::GetTempPath()) "precommit-inspect-diff-$([Guid]::NewGuid()).bin"
+try {
+    $proc = Start-Process -FilePath 'git' `
+        -ArgumentList @('diff','--cached','-z','--name-only','--diff-filter=ACMR') `
+        -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $diffTempFile
+    if ($proc.ExitCode -ne 0) {
+        Write-Host "pre-commit: 'git diff --cached -z' failed (exit $($proc.ExitCode)); skipping inspection." -ForegroundColor Red
+        exit 1
+    }
+    $bytes = if (Test-Path $diffTempFile) { [System.IO.File]::ReadAllBytes($diffTempFile) } else { [byte[]]@() }
+} finally {
+    if (Test-Path $diffTempFile) { Remove-Item $diffTempFile -Force -ErrorAction SilentlyContinue }
 }
-# A NUL-terminated list ends with an empty element after split; drop it.
-$stagedRaw = if ($gitOutput) { $gitOutput -split "`0" | Where-Object { $_ -ne '' } } else { @() }
+$diffText = if ($bytes.Length -gt 0) { [System.Text.Encoding]::UTF8.GetString($bytes) } else { '' }
+# `-z` is terminator-style (trailing NUL after every record), so the last
+# split element is the empty string; drop empties.
+$stagedRaw = if ($diffText) { $diffText -split "`0" | Where-Object { $_ -ne '' } } else { @() }
 $stagedFiles = @($stagedRaw | Where-Object { $_ -like '*.cs' })
 
 $badNewline = @($stagedFiles | Where-Object { $_ -match "[`r`n]" })
