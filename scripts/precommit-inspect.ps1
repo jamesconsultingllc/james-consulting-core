@@ -333,7 +333,7 @@ $ignoredRulesNormalized = @(
 )
 
 $results = @($sarif.runs[0].results | Where-Object {
-        $_.level -eq 'warning' -and
+        $_.level -in @('warning', 'error') -and
         $_.ruleId -notin $ignoredRulesNormalized
     })
 

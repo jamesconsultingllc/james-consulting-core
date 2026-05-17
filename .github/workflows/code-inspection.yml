@@ -240,7 +240,7 @@ jobs:
           }
 
           $failures = @($sarif.runs[0].results | Where-Object {
-              $_.level -eq 'warning' -and
+              $_.level -in @('warning', 'error') -and
               $_.ruleId -notin $ignored -and
               $stagedSet.Contains((Normalize-SarifUri $_.locations[0].physicalLocation.artifactLocation.uri))
           })
