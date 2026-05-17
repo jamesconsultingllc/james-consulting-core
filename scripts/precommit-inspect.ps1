@@ -65,7 +65,36 @@ if (-not $Solution) {
     $Solution = (Resolve-Path $candidates[0].FullName -Relative)
 }
 
-$stagedFiles = & git diff --cached --name-only --diff-filter=ACMR | Where-Object { $_ -like '*.cs' }
+# Use NUL-delimited output (`-z`) so a staged path containing a newline
+# survives intact instead of being split into two bogus entries. Git
+# permits CR/LF in path names. We then reject any path containing CR/LF
+# explicitly before further processing — the rest of the script (include
+# mask, staged-set membership, error messages) cannot represent CR/LF
+# safely, so fail closed in that case.
+$gitOutput = & git diff --cached -z --name-only --diff-filter=ACMR
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "pre-commit: 'git diff --cached' failed (exit $LASTEXITCODE); skipping inspection." -ForegroundColor Red
+    exit 1
+}
+# A NUL-terminated list ends with an empty element after split; drop it.
+$stagedRaw = if ($gitOutput) { $gitOutput -split "`0" | Where-Object { $_ -ne '' } } else { @() }
+$stagedFiles = @($stagedRaw | Where-Object { $_ -like '*.cs' })
+
+$badNewline = @($stagedFiles | Where-Object { $_ -match "[`r`n]" })
+if ($badNewline.Count -gt 0) {
+    Write-Host ""
+    Write-Host "pre-commit: refusing to inspect — staged filename contains CR/LF, which cannot be safely represented in the include mask:" -ForegroundColor Red
+    $badNewline | ForEach-Object {
+        # Render the offending path as a literal escape so the CR/LF doesn't
+        # corrupt the terminal output itself.
+        $escaped = ($_ -replace "`r",'\r') -replace "`n",'\n'
+        Write-Host "  $escaped" -ForegroundColor Red
+    }
+    Write-Host ""
+    Write-Host "  Rename the file (or commit it under a different name) and re-stage." -ForegroundColor Yellow
+    Write-Host "  Bypass in an emergency with: git commit --no-verify" -ForegroundColor Yellow
+    exit 1
+}
 
 if (-not $stagedFiles) {
     Write-Host "pre-commit: no staged .cs files - skipping inspection." -ForegroundColor DarkGray
