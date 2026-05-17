@@ -152,8 +152,13 @@ jobs:
           INCLUDE_MASK: ${{ steps.changed.outputs.mask }}
           SOLUTION: ${{ env.SOLUTION }}
         run: |
+          # InspectCode defaults to XML regardless of output filename — the
+          # .sarif extension does NOT auto-select format. Without
+          # --format=Sarif the downstream ConvertFrom-Json parse blows up
+          # on XML output.
           dotnet jb inspectcode "$SOLUTION" \
             --output=inspectcode.sarif \
+            --format=Sarif \
             --include="$INCLUDE_MASK" \
             --no-build \
             --verbosity=WARN
@@ -176,14 +181,14 @@ jobs:
           if (-not (Test-Path inspectcode.sarif)) {
               Write-Host "::error::InspectCode produced no SARIF report at inspectcode.sarif."
               Write-Host "::error::Rerun locally to investigate:"
-              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
+              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --format=Sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
               exit 1
           }
           $sarifInfo = Get-Item inspectcode.sarif
           if ($sarifInfo.Length -eq 0) {
               Write-Host "::error::InspectCode produced an empty SARIF report at inspectcode.sarif (0 bytes)."
               Write-Host "::error::Rerun locally to investigate:"
-              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
+              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --format=Sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
               exit 1
           }
 
@@ -210,7 +215,7 @@ jobs:
           } catch {
               Write-Host "::error::Failed to parse inspectcode.sarif as JSON: $($_.Exception.Message)"
               Write-Host "::error::Rerun locally to investigate:"
-              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
+              Write-Host "::error::  dotnet jb inspectcode `"$($env:SOLUTION)`" --output=inspectcode.sarif --format=Sarif --include=`"$($env:INCLUDE_MASK)`" --no-build --verbosity=WARN"
               exit 1
           }
 

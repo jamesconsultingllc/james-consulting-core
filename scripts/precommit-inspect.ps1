@@ -245,6 +245,10 @@ $jbArgs = @(
     'inspectcode',
     $Solution,
     "--output=$reportPath",
+    # InspectCode defaults to XML regardless of output filename — the .sarif
+    # extension does NOT auto-select format. Without --format=Sarif the
+    # downstream ConvertFrom-Json parse blows up on XML output.
+    '--format=Sarif',
     "--include=$includeMask",
     '--no-build',
     '--verbosity=WARN'
