@@ -18,10 +18,12 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <EnablePackageValidation>true</EnablePackageValidation>
         <DebugType>embedded</DebugType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
 
     <ItemGroup>
         <AdditionalFiles Include="..\..\.sonarlint\james-consulting-core\CSharp\SonarLint.xml" Link="SonarLint.xml"/>
+        <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     </ItemGroup>
 
     <ItemGroup>
