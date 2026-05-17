@@ -118,7 +118,12 @@ jobs:
         run: dotnet restore ${{ env.SOLUTION }}
 
       - name: Restore .NET tools (pinned via .config/dotnet-tools.json)
-        if: steps.changed.outputs.count != '0'
+        # Run unconditionally — even when no .cs files changed. This workflow
+        # is triggered by changes to .config/dotnet-tools.json and the gate
+        # scripts themselves, so a count=0 run is exactly when we need to
+        # validate the manifest pin still resolves. Without this, a manifest
+        # change with a bad/nonexistent InspectCode version could merge and
+        # break the gate on the next PR that touches .cs.
         # Manifest pins jb to a specific version so CI and dev machines run
         # the exact same InspectCode build. Bump the manifest intentionally
         # to upgrade.

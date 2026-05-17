@@ -223,7 +223,20 @@ if ($badSep.Count -gt 0) {
     Write-Host "  Bypass in an emergency with: git commit --no-verify" -ForegroundColor Yellow
     exit 1
 }
-$includeMask = ($stagedFiles | ForEach-Object { "**/" + (Split-Path $_ -Leaf) } | Sort-Object -Unique) -join ';'
+# De-duplicate leaf basenames with the same comparer used for $stagedSet
+# ($pathComparer). PowerShell's default `Sort-Object -Unique` is case-
+# insensitive on every platform, but on POSIX filesystems Foo.cs and foo.cs
+# are distinct files — using the default comparer there would collapse the
+# two leaves into one mask and silently skip one of the files.
+$leafSet = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+$includeMaskParts = New-Object System.Collections.Generic.List[string]
+foreach ($f in $stagedFiles) {
+    $leaf = Split-Path $f -Leaf
+    if ($leafSet.Add($leaf)) {
+        [void]$includeMaskParts.Add("**/$leaf")
+    }
+}
+$includeMask = $includeMaskParts -join ';'
 
 $jbArgs = @(
     'inspectcode',
