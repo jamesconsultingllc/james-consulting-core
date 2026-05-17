@@ -207,16 +207,19 @@ function Restore-WorkingTree {
 $script:stashed = $stashed
 
 # --include uses file-name wildcards; we use **/<leaf> so patterns match the
-# solution layout. The mask is semicolon-delimited, so a basename containing
-# `;` would silently split into multiple bogus masks and the real file would
-# never be inspected — a quiet bypass of the pre-commit gate. Git permits
-# `;` in path names; fail closed (don't try to be clever) when a staged
-# basename contains a separator we can't escape.
-$badSep = @($stagedFiles | Where-Object { (Split-Path $_ -Leaf) -match ';' })
+# solution layout. The mask is semicolon-delimited and InspectCode interprets
+# `*`, `?`, `[`, `]` as wildcard metacharacters. A basename containing any of
+# these would either split into bogus masks (`;`) or be interpreted as a
+# pattern rather than a literal — so InspectCode could end up inspecting a
+# *different* file that happens to match the pattern and skip the staged one,
+# letting warnings through. Git permits all of these characters in path
+# names; fail closed (don't try to be clever) when a staged basename
+# contains one we can't escape.
+$badSep = @($stagedFiles | Where-Object { (Split-Path $_ -Leaf) -match '[;*?\[\]]' })
 if ($badSep.Count -gt 0) {
     Restore-WorkingTree
     Write-Host ""
-    Write-Host "pre-commit: refusing to inspect — staged filename contains ';' which is the InspectCode --include separator:" -ForegroundColor Red
+    Write-Host "pre-commit: refusing to inspect — staged filename contains InspectCode --include metacharacters (;, *, ?, [, ]):" -ForegroundColor Red
     $badSep | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
     Write-Host ""
     Write-Host "  Rename the file (or commit it under a different name) and re-stage." -ForegroundColor Yellow

@@ -66,15 +66,20 @@ jobs:
           # metacharacters survive intact (basenames in particular).
           mapfile -d '' files < <(git diff --name-only --diff-filter=ACMR -z "$base...$head" |
                                   awk -v RS='\0' -v ORS='\0' '/\.cs$/')
-          # Reject CR/LF or ';' in any changed filename before we write to
-          # GITHUB_OUTPUT. Git permits newlines and semicolons in paths.
-          # CR/LF would let a crafted filename inject extra output records
-          # (e.g. override `count` or `mask`) and bypass the gate. ';' is
-          # the InspectCode --include separator, so a basename containing
-          # ';' would silently split into multiple bogus masks and the real
-          # file would never be inspected — a quiet bypass of CI. Fail
-          # closed instead of trying to be clever — nobody legitimately
-          # checks in a .cs file whose name contains a newline or ';'.
+          # Reject CR/LF or InspectCode --include metacharacters in any
+          # changed filename before we write to GITHUB_OUTPUT. Git permits
+          # newlines, ';', '*', '?', '[' and ']' in paths. CR/LF would let a
+          # crafted filename inject extra output records (e.g. override
+          # `count` or `mask`) and bypass the gate. ';' is the InspectCode
+          # --include separator, so a basename containing ';' would silently
+          # split into multiple bogus masks and the real file would never be
+          # inspected. '*', '?', '[' and ']' are InspectCode wildcard
+          # metacharacters: a basename containing them would be interpreted
+          # as a pattern rather than a literal, so InspectCode could end up
+          # inspecting a *different* file that matches the pattern and skip
+          # the staged one — also a quiet bypass of CI. Fail closed instead
+          # of trying to be clever — nobody legitimately checks in a .cs
+          # file whose name contains any of these.
           for f in "${files[@]}"; do
             case "$f" in
               *$'\n'*|*$'\r'*)
@@ -84,9 +89,15 @@ jobs:
                 ;;
             esac
             case "$(basename -- "$f")" in
-              *';'*)
-                echo "::error::Refusing to inspect: changed filename basename contains ';' (the InspectCode --include separator): $f" >&2
-                exit 1
+              *$'\n'*|*$'\r'*) ;;  # already caught above
+              *)
+                # Bash case `[...]` bracket expressions can't cleanly cover
+                # `]`, `[`, `;`, `*`, `?` without quoting gymnastics that
+                # break on different shell versions; use grep for clarity.
+                if printf '%s' "$(basename -- "$f")" | LC_ALL=C grep -q '[][;*?]'; then
+                  echo "::error::Refusing to inspect: changed filename basename contains an InspectCode --include metacharacter (one of ;, *, ?, [, ]): $f" >&2
+                  exit 1
+                fi
                 ;;
             esac
           done
