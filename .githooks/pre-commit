@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# Pre-commit hook: runs JetBrains InspectCode on staged .cs files.
+# Best-effort: if PowerShell is not on PATH, prints a one-line notice to
+# stderr and exits 0 (commit is allowed to proceed).
+#
+# Tool resolution lives in scripts/precommit-inspect.ps1 — it prefers the
+# manifest-pinned local tool (`dotnet jb` from .config/dotnet-tools.json)
+# over a globally-installed `jb`, and falls back to a one-time `dotnet tool
+# install -g JetBrains.ReSharper.GlobalTools` only when no manifest exists.
+# Pass -SkipAutoInstall to disable that fallback global install.
+#
+# Bypass in emergencies with: git commit --no-verify
+#
+# One-time setup per clone (wires this hook into .git/hooks):
+#   pwsh scripts/setup-hooks.ps1
+
+set -e
+
+if command -v pwsh >/dev/null 2>&1; then
+  PS="pwsh"
+else
+  # We intentionally do NOT fall back to Windows PowerShell 5.1 here:
+  # scripts/precommit-inspect.ps1 relies on PowerShell 7+ features
+  # ($IsWindows automatic variable, ternary, etc.). Falling back to
+  # `powershell` on a machine without `pwsh` would surface as a parse
+  # error and block commits instead of skipping cleanly.
+  echo "pre-commit: 'pwsh' (PowerShell 7+) not found on PATH; skipping hooks" >&2
+  echo "pre-commit:   install with: winget install Microsoft.PowerShell  (Windows) /  brew install powershell  (macOS) /  see https://aka.ms/powershell" >&2
+  exit 0
+fi
+
+"$PS" -NoProfile -ExecutionPolicy Bypass -File scripts/precommit-inspect.ps1
