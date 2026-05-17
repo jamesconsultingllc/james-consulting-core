@@ -9,8 +9,12 @@
         <CodeAnalysisRuleSet>..\..\.sonarlint\james-consulting-corecsharp.ruleset</CodeAnalysisRuleSet>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
-        <IncludeSymbols>true</IncludeSymbols>
-        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <!-- DebugType=embedded puts PDBs inside the .dll files in the .nupkg
+             (alongside SourceLink metadata), which is the modern best practice.
+             Do NOT also generate a .snupkg: with embedded PDBs the symbol
+             package is empty and nuget.org rejects it with HTTP 400
+             "The package does not contain any symbol (.pdb) files." -->
+        <IncludeSymbols>false</IncludeSymbols>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <EnablePackageValidation>true</EnablePackageValidation>
         <DebugType>embedded</DebugType>
