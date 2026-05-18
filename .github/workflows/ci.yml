@@ -226,6 +226,51 @@ jobs:
             --base-directory "$(Get-Location)\artifacts" `
             "*.nupkg"
 
+      - name: Extract signing leaf cert
+        id: extract-cert
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $nupkg = Get-ChildItem .\artifacts\*.nupkg | Select-Object -First 1
+          if (-not $nupkg) { throw "No signed .nupkg found in .\artifacts" }
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($nupkg.FullName)
+          try {
+            $entry = $zip.GetEntry('.signature.p7s')
+            if (-not $entry) { throw "No .signature.p7s in $($nupkg.Name) — package was not signed" }
+            $ms = New-Object System.IO.MemoryStream
+            $s  = $entry.Open(); $s.CopyTo($ms); $s.Dispose()
+            $sigBytes = $ms.ToArray()
+          } finally { $zip.Dispose() }
+          $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
+          $cms.Decode($sigBytes)
+          $leaf = $cms.SignerInfos[0].Certificate
+          $ver = '${{ steps.version.outputs.version }}'
+          $cerPath = ".\artifacts\signing-cert-$ver.cer"
+          [System.IO.File]::WriteAllBytes($cerPath, $leaf.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+          $fp = $leaf.GetCertHashString('SHA256')
+          Write-Host "Leaf cert    : $($leaf.Subject)"
+          Write-Host "SHA-256      : $fp"
+          Write-Host "NotBefore    : $($leaf.NotBefore.ToString('o'))"
+          Write-Host "NotAfter     : $($leaf.NotAfter.ToString('o'))"
+          Write-Host "Wrote        : $cerPath"
+          "fingerprint=$fp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "cer-path=$cerPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # Surface in job summary so it's visible without downloading the artifact.
+          @"
+          ## Signing certificate
+
+          | Field    | Value |
+          |----------|-------|
+          | Subject  | $($leaf.Subject) |
+          | Issuer   | $($leaf.Issuer) |
+          | SHA-256  | ``$fp`` |
+          | Valid    | $($leaf.NotBefore.ToString('u')) → $($leaf.NotAfter.ToString('u')) |
+
+          If nuget.org rejects the package with a fingerprint mismatch, register the
+          ``signing-cert-$ver`` artifact (the ``.cer`` file) at https://www.nuget.org/account/Certificates.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       # ----- NuGet Trusted Publishing (OIDC, no API key) -----
       # NUGET_USER must be the nuget.org USERNAME of the trust-policy CREATOR.
       - name: NuGet login (OIDC)
@@ -263,10 +308,17 @@ jobs:
             ./artifacts/*.nupkg
           retention-days: 90
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Stable publish — only on v* tags. Verifies tag matches version.json
-  # and that the tagged commit is reachable from $STABLE_BRANCH.
-  # ─────────────────────────────────────────────────────────────────────────
+      - name: Upload signing certificate artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signing-cert-${{ steps.version.outputs.version }}
+          path: ./artifacts/signing-cert-*.cer
+          retention-days: 365
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # Stable publish — only on v* tags. Verifies tag matches version.json
+      # and that the tagged commit is reachable from $STABLE_BRANCH.
+      # ─────────────────────────────────────────────────────────────────────────
   publish-stable:
     name: Sign & Publish Stable
     needs: build-test
@@ -367,6 +419,50 @@ jobs:
             --base-directory "$(Get-Location)\artifacts" `
             "*.nupkg"
 
+      - name: Extract signing leaf cert
+        id: extract-cert
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $nupkg = Get-ChildItem .\artifacts\*.nupkg | Select-Object -First 1
+          if (-not $nupkg) { throw "No signed .nupkg found in .\artifacts" }
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($nupkg.FullName)
+          try {
+            $entry = $zip.GetEntry('.signature.p7s')
+            if (-not $entry) { throw "No .signature.p7s in $($nupkg.Name) — package was not signed" }
+            $ms = New-Object System.IO.MemoryStream
+            $s  = $entry.Open(); $s.CopyTo($ms); $s.Dispose()
+            $sigBytes = $ms.ToArray()
+          } finally { $zip.Dispose() }
+          $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
+          $cms.Decode($sigBytes)
+          $leaf = $cms.SignerInfos[0].Certificate
+          $ver = '${{ steps.version.outputs.version }}'
+          $cerPath = ".\artifacts\signing-cert-$ver.cer"
+          [System.IO.File]::WriteAllBytes($cerPath, $leaf.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+          $fp = $leaf.GetCertHashString('SHA256')
+          Write-Host "Leaf cert    : $($leaf.Subject)"
+          Write-Host "SHA-256      : $fp"
+          Write-Host "NotBefore    : $($leaf.NotBefore.ToString('o'))"
+          Write-Host "NotAfter     : $($leaf.NotAfter.ToString('o'))"
+          Write-Host "Wrote        : $cerPath"
+          "fingerprint=$fp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "cer-path=$cerPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          @"
+          ## Signing certificate
+
+          | Field    | Value |
+          |----------|-------|
+          | Subject  | $($leaf.Subject) |
+          | Issuer   | $($leaf.Issuer) |
+          | SHA-256  | ``$fp`` |
+          | Valid    | $($leaf.NotBefore.ToString('u')) → $($leaf.NotAfter.ToString('u')) |
+
+          If nuget.org rejects the package with a fingerprint mismatch, register the
+          ``signing-cert-$ver`` artifact (the ``.cer`` file) at https://www.nuget.org/account/Certificates.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: NuGet login (OIDC)
         id: nuget-login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
@@ -402,6 +498,13 @@ jobs:
             ./artifacts/*.nupkg
           retention-days: 90
 
+      - name: Upload signing certificate artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signing-cert-${{ steps.version.outputs.version }}
+          path: ./artifacts/signing-cert-*.cer
+          retention-days: 365
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -409,3 +512,4 @@ jobs:
           generate_release_notes: true
           files: |
             ./artifacts/*.nupkg
+            ./artifacts/signing-cert-*.cer
