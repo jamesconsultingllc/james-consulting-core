@@ -5,6 +5,7 @@
 [![Downloads](https://img.shields.io/nuget/dt/JamesConsulting.svg?logo=nuget&label=Downloads)](https://www.nuget.org/packages/JamesConsulting/)
 [![License: MIT](https://img.shields.io/github/license/jamesconsultingllc/james-consulting-core.svg)](LICENSE)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=jamesconsultingllc_james-consulting-core&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jamesconsultingllc_james-consulting-core)
+[![Docs](https://img.shields.io/badge/docs-jamesconsulting.biz-blue?logo=readthedocs)](https://docs.jamesconsulting.biz/james-consulting-core/)
 
 > A small, opinionated grab-bag of extension methods, helpers, and primitives shared across all
 > James Consulting LLC libraries. Multi-targets `netstandard2.0`, `netstandard2.1`, `net9.0`, and
@@ -45,6 +46,8 @@ dotnet add package JamesConsulting
 
 All public APIs ship with XML documentation; downstream consumers get IntelliSense + SourceLink for
 step-into debugging.
+
+📚 **Full API reference:** **<https://docs.jamesconsulting.biz/james-consulting-core/>** (generated with DocFX from `master`).
 
 ---
 

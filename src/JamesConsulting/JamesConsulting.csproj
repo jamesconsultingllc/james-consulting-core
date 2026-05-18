@@ -3,21 +3,30 @@
     <PropertyGroup>
         <PackageId>JamesConsulting</PackageId>
         <Product>James Consulting Core Library</Product>
+        <Title>James Consulting Core Library</Title>
+        <Description>A small, opinionated grab-bag of extension methods, helpers, and primitives shared across James Consulting LLC libraries. Includes string/byte/enum/object extensions (mask/redact, deep-clone, JSON), reflection helpers, async helpers, cryptography helpers, IHost initializer hooks, and more. Multi-targets netstandard2.0, netstandard2.1, net9.0, net10.0.</Description>
+        <PackageTags>extensions;helpers;dotnet;netstandard;reflection;strings;cryptography;hosting;ihost;async</PackageTags>
         <ProjectGuid>9F232F91-5328-4EE7-BC83-AB21CBA9C18B</ProjectGuid>
         <LangVersion>default</LangVersion>
         <TargetFrameworks>netstandard2.0;netstandard2.1;net9.0;net10.0</TargetFrameworks>
         <CodeAnalysisRuleSet>..\..\.sonarlint\james-consulting-corecsharp.ruleset</CodeAnalysisRuleSet>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
-        <IncludeSymbols>true</IncludeSymbols>
-        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <!-- DebugType=embedded puts PDBs inside the .dll files in the .nupkg
+             (alongside SourceLink metadata), which is the modern best practice.
+             Do NOT also generate a .snupkg: with embedded PDBs the symbol
+             package is empty and nuget.org rejects it with HTTP 400
+             "The package does not contain any symbol (.pdb) files." -->
+        <IncludeSymbols>false</IncludeSymbols>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <EnablePackageValidation>true</EnablePackageValidation>
         <DebugType>embedded</DebugType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
 
     <ItemGroup>
         <AdditionalFiles Include="..\..\.sonarlint\james-consulting-core\CSharp\SonarLint.xml" Link="SonarLint.xml"/>
+        <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     </ItemGroup>
 
     <ItemGroup>

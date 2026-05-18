@@ -282,14 +282,104 @@ All code must follow **OWASP WSTG v4.2** and address **OWASP Top 10:2025**.
 
 ## GitFlow Branching
 
-**Always create feature branches from `develop`, never from `main`.**
+**Always create feature branches from `develop`, never from `master`.**
 
 | Branch Type | Create From | Merge To | Pattern |
 |-------------|-------------|----------|---------|
 | `feature/*` | `develop` | `develop` | `feature/descriptive-name` |
 | `bugfix/*` | `develop` | `develop` | `bugfix/descriptive-name` |
-| `release/*` | `develop` | `main` + `develop` | `release/x.y.z` |
-| `hotfix/*` | `main` | `main` + `develop` | `hotfix/x.y.z` |
+| `release/*` | `develop` | `master` **+** `develop` | `release/x.y.z` |
+| `hotfix/*` | `master` | `master` **+** `develop` | `hotfix/x.y.z` |
+
+The stable branch here is **`master`** (not `main`). Tags ship from `master` only.
+
+References: [Atlassian GitFlow](https://www.atlassian.com/git/tutorials/comparing-workflows/gitflow-workflow) · [git-flow-next CLI](https://git-flow.sh/docs/commands/)
+
+### Tooling
+
+We standardize on `git-flow-next`. One-time setup in this repo:
+
+```bash
+git flow init --preset=classic --main=master --develop=develop --tag=v --defaults
+git flow config list   # verify
+```
+
+### Versioning Strategy (NBGV)
+
+Versions are driven by **`version.json`** at the repo root, computed by [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) (pinned in `src/Directory.Build.props`). Do **not** pass `-p:Version=...` on the build CLI — NBGV's pack target overrides it.
+
+| Branch | `version.json` `"version"` | NBGV output | NuGet package |
+|---|---|---|---|
+| `master` | `"X.Y.Z"` (no prerelease, no `{height}`) | `X.Y.Z` | `JamesConsulting.X.Y.Z.nupkg` |
+| `release/X.Y.x` | `"X.Y.Z-rc.{height}"` | `X.Y.Z-rc.N` | `JamesConsulting.X.Y.Z-rc.N.nupkg` |
+| `develop` | `"X.(Y+1).0-alpha.{height}"` | `…-alpha.N-g<sha>` (non-public-release) | CI-only artifact |
+| feature/bugfix | inherits from `develop` | non-public-release | CI-only artifact |
+
+`publicReleaseRefSpec` in `version.json` includes `master`, `release/*`, and `hotfix/*`. The `nugetPackageVersion.semVer: 2` setting is required — without it the dot in `-rc.N` becomes a dash and the digit gets zero-padded.
+
+### Release Workflow
+
+```bash
+# 1. cut the release from develop
+git switch develop && git pull
+git flow release start 2.0.0
+git push -u origin release/2.0.0
+# -> publish-rc fires: 2.0.0-rc.1, 2.0.0-rc.2, ...
+
+# 2. QA the RCs on nuget.org / consuming apps. Push fixes to release/2.0.0
+#    to produce 2.0.0-rc.N+1 until QA is clean.
+
+# 3. BUMP version.json BEFORE finishing the release.
+#    On release/2.0.0 ONLY:
+#      "version": "2.0.0-rc.{height}"  ->  "version": "2.0.0"
+#    Commit locally, but DO NOT push to release/2.0.0 -- a push would
+#    trigger publish-rc, whose version validator requires -rc(\.\d+)?$ and
+#    would fail on a clean "2.0.0". Let `git flow release finish` carry
+#    the bump straight into master.
+git add version.json
+git commit -m "chore(release): bump version.json to 2.0.0 for final tag"
+dotnet nbgv get-version -p src/JamesConsulting -v NuGetPackageVersion
+# expected output: 2.0.0   (NOT 2.0.0-rc.N)
+
+# 4. finish the release: merges into master, tags v2.0.0, merges into develop
+git flow release finish 2.0.0
+git push origin master develop --follow-tags
+# -> publish-stable fires on the v2.0.0 tag: ships 2.0.0 + GitHub Release
+
+# 5. start the next dev cycle on develop (bump to next minor -alpha)
+git switch develop
+# edit version.json: "version": "2.1.0-alpha.{height}"
+git commit -am "chore(develop): start 2.1.0-alpha"
+git push
+```
+
+### Hotfix Workflow
+
+```bash
+git flow hotfix start 2.0.1
+# edit version.json on hotfix/2.0.1: "version": "2.0.1"
+# fix + commit + push (publish-rc does not run on hotfix/*; if you want
+# RC artifacts from hotfix branches, keep version.json as "2.0.1-rc.{height}"
+# until ready to finish, same pattern as release/*)
+git flow hotfix finish 2.0.1
+git push origin master develop --follow-tags
+```
+
+### CI Triggers (`.github/workflows/ci.yml`)
+
+| Trigger | Job | Output |
+|---|---|---|
+| Any push / PR / dispatch | `build-test` | Build, test, Sonar, coverage, preview pack |
+| Push to `release/**` | `publish-rc` | Signs + publishes `X.Y.Z-rc.N` (gated on `release` environment approval) |
+| Push tag `v*` | `publish-stable` | Validates tag is reachable from `master` and matches NBGV-computed version, then signs + publishes stable + creates GitHub Release |
+
+### Rules
+
+1. **Never tag from `develop`.** Tags live on `master` only.
+2. **Never skip the back-merge to `develop`** — always use `git flow release finish` / `git flow hotfix finish`.
+3. **Always bump `version.json` to the clean stable version on the release branch before `git flow release finish`** — but commit only, don't push the bump to `release/*`.
+4. **No squash merges on `release/*`/`hotfix/*` → `master` or `develop`.** GitFlow needs the real merge commits.
+5. **One release branch at a time.** Finish or abandon before starting another.
 
 ---
 

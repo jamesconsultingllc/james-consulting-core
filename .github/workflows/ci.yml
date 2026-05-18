@@ -28,6 +28,9 @@ permissions:
 
 env:
   PACKAGE_PROJECT: src/JamesConsulting/JamesConsulting.csproj
+  # Run JavaScript-based actions on Node.js 24 now (default starting June 2026).
+  # Silences the "Node.js 20 actions are deprecated" warning on the runner.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   SOLUTION: src/JamesConsulting.sln
   STABLE_BRANCH: master  # branch from which v* tags must be cut
 
@@ -123,7 +126,6 @@ jobs:
           name: nupkg-${{ github.run_number }}
           path: |
             ./artifacts/*.nupkg
-            ./artifacts/*.snupkg
           retention-days: 14
 
       - name: Upload test results
@@ -162,23 +164,23 @@ jobs:
             9.0.x
             10.0.x
 
+      - name: Restore tools
+        run: dotnet tool restore
+
       - name: Determine RC version
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          VER=$(jq -r '.version' version.json)
-          if [ -z "${VER:-}" ] || [ "$VER" = "null" ]; then
-            echo "::error::Could not read .version from version.json"
+          VERSION=$(dotnet nbgv get-version -p src/JamesConsulting -v NuGetPackageVersion)
+          if [ -z "$VERSION" ]; then
+            echo "::error::nbgv returned empty NuGetPackageVersion"
             exit 1
           fi
-          # version.json may be "2.0" or "2.0.0"; normalise to MAJOR.MINOR.0
-          MAJOR=$(echo "$VER" | cut -d. -f1)
-          MINOR=$(echo "$VER" | cut -d. -f2)
-          PATCH=$(echo "$VER" | cut -d. -f3)
-          PATCH=${PATCH:-0}
-          PREFIX="${MAJOR}.${MINOR}.${PATCH}"
-          VERSION="${PREFIX}-rc.${{ github.run_number }}"
+          if [[ ! "$VERSION" =~ -rc(\.[0-9]+)?$ ]]; then
+            echo "::error::Expected RC version on release/* branch but got '$VERSION'. Is version.json set to '<MAJOR>.<MINOR>.<PATCH>-rc'?"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Publishing $VERSION (rc) from $PACKAGE_PROJECT"
 
@@ -188,7 +190,7 @@ jobs:
       - name: Build
         env:
           CI: 'true'
-        run: dotnet build $env:SOLUTION --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+        run: dotnet build $env:SOLUTION --configuration Release --no-restore
 
       - name: Pack
         shell: bash
@@ -196,8 +198,7 @@ jobs:
           dotnet pack "$PACKAGE_PROJECT" \
             --configuration Release \
             --no-build \
-            --output ./artifacts \
-            -p:Version=${{ steps.version.outputs.version }}
+            --output ./artifacts
 
       # ----- Azure Trusted Signing -----
       # Federated credential required on the Entra app behind AZURE_CLIENT_ID:
@@ -236,18 +237,23 @@ jobs:
       - name: Push to nuget.org
         shell: bash
         run: |
-          dotnet nuget push "./artifacts/*.nupkg" \
-            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
-          # Push symbol packages alongside; --skip-duplicate keeps the
-          # job idempotent across retries.
-          if compgen -G "./artifacts/*.snupkg" > /dev/null; then
-            dotnet nuget push "./artifacts/*.snupkg" \
+          set -euo pipefail
+          # `dotnet nuget push` does not expand globs and bash does not
+          # expand them inside double quotes — enumerate explicitly with
+          # `compgen -G` (which handles "no matches" without erroring under
+          # `set -e`) and push each file individually. `--skip-duplicate`
+          # keeps the job idempotent across retries.
+          mapfile -t NUPKGS < <(compgen -G "./artifacts/*.nupkg" || true)
+          if [ "${#NUPKGS[@]}" -eq 0 ]; then
+            echo "::error::No .nupkg files found in ./artifacts to push."
+            exit 1
+          fi
+          for pkg in "${NUPKGS[@]}"; do
+            dotnet nuget push "$pkg" \
               --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
               --source https://api.nuget.org/v3/index.json \
               --skip-duplicate
-          fi
+          done
 
       - name: Upload signed package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -255,7 +261,6 @@ jobs:
           name: published-${{ steps.version.outputs.version }}
           path: |
             ./artifacts/*.nupkg
-            ./artifacts/*.snupkg
           retention-days: 90
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -287,30 +292,28 @@ jobs:
             9.0.x
             10.0.x
 
+      - name: Restore tools
+        run: dotnet tool restore
+
       - name: Determine stable version
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          VER=$(jq -r '.version' version.json)
-          if [ -z "${VER:-}" ] || [ "$VER" = "null" ]; then
-            echo "::error::Could not read .version from version.json"
-            exit 1
-          fi
-          MAJOR=$(echo "$VER" | cut -d. -f1)
-          MINOR=$(echo "$VER" | cut -d. -f2)
-          PATCH=$(echo "$VER" | cut -d. -f3)
-          PATCH=${PATCH:-0}
-          PREFIX="${MAJOR}.${MINOR}.${PATCH}"
 
+          # Tag must be a clean stable v<MAJOR>.<MINOR>.<PATCH>.
           if [[ ! "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Stable tags must match v<MAJOR>.<MINOR>.<PATCH> exactly. Got: ${GITHUB_REF#refs/tags/}"
             exit 1
           fi
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
 
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          if [ "$VERSION" != "$PREFIX" ]; then
-            echo "::error::Stable tag v$VERSION must match version.json ($PREFIX)."
+          # NBGV computes the version from version.json + branch state; on a
+          # tagged commit reachable from $STABLE_BRANCH (a public release ref)
+          # it must produce exactly the tag version (no prerelease, no metadata).
+          NBGV_VERSION=$(dotnet nbgv get-version -p src/JamesConsulting -v NuGetPackageVersion)
+          if [ "$NBGV_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag v$TAG_VERSION does not match nbgv-computed version '$NBGV_VERSION'. Bump version.json on $STABLE_BRANCH to '$TAG_VERSION' before tagging."
             exit 1
           fi
 
@@ -324,8 +327,8 @@ jobs:
             exit 1
           fi
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publishing $VERSION (stable) from $PACKAGE_PROJECT"
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $TAG_VERSION (stable) from $PACKAGE_PROJECT"
 
       - name: Restore
         run: dotnet restore $env:SOLUTION
@@ -333,7 +336,7 @@ jobs:
       - name: Build
         env:
           CI: 'true'
-        run: dotnet build $env:SOLUTION --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+        run: dotnet build $env:SOLUTION --configuration Release --no-restore
 
       - name: Pack
         shell: bash
@@ -341,8 +344,7 @@ jobs:
           dotnet pack "$PACKAGE_PROJECT" \
             --configuration Release \
             --no-build \
-            --output ./artifacts \
-            -p:Version=${{ steps.version.outputs.version }}
+            --output ./artifacts
 
       - name: Azure login (OIDC)
         uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
@@ -374,18 +376,23 @@ jobs:
       - name: Push to nuget.org
         shell: bash
         run: |
-          dotnet nuget push "./artifacts/*.nupkg" \
-            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
-          # Push symbol packages alongside; --skip-duplicate keeps the
-          # job idempotent across retries.
-          if compgen -G "./artifacts/*.snupkg" > /dev/null; then
-            dotnet nuget push "./artifacts/*.snupkg" \
+          set -euo pipefail
+          # `dotnet nuget push` does not expand globs and bash does not
+          # expand them inside double quotes — enumerate explicitly with
+          # `compgen -G` (which handles "no matches" without erroring under
+          # `set -e`) and push each file individually. `--skip-duplicate`
+          # keeps the job idempotent across retries.
+          mapfile -t NUPKGS < <(compgen -G "./artifacts/*.nupkg" || true)
+          if [ "${#NUPKGS[@]}" -eq 0 ]; then
+            echo "::error::No .nupkg files found in ./artifacts to push."
+            exit 1
+          fi
+          for pkg in "${NUPKGS[@]}"; do
+            dotnet nuget push "$pkg" \
               --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
               --source https://api.nuget.org/v3/index.json \
               --skip-duplicate
-          fi
+          done
 
       - name: Upload signed package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -393,7 +400,6 @@ jobs:
           name: published-${{ steps.version.outputs.version }}
           path: |
             ./artifacts/*.nupkg
-            ./artifacts/*.snupkg
           retention-days: 90
 
       - name: Create GitHub Release
@@ -403,4 +409,3 @@ jobs:
           generate_release_notes: true
           files: |
             ./artifacts/*.nupkg
-            ./artifacts/*.snupkg

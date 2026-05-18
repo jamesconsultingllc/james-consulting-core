@@ -2,7 +2,7 @@
     <PropertyGroup>
         <!-- Solution-wide metadata. Per-project metadata (PackageId, Description, etc.)
              still lives in each .csproj. -->
-        <Authors>Rudy James</Authors>
+        <Authors>James Consulting LLC</Authors>
         <Company>James Consulting LLC</Company>
         <RepositoryOwner>jamesconsultingllc</RepositoryOwner>
         <RepositoryName>james-consulting-core</RepositoryName>
@@ -16,6 +16,7 @@
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <RepositoryUrl>https://github.com/$(RepositoryOwner)/$(RepositoryName)</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
+        <PackageProjectUrl>https://docs.jamesconsulting.biz/james-consulting-core/</PackageProjectUrl>
 
         <!-- Build behavior -->
         <Nullable>enable</Nullable>
