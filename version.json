@@ -7,7 +7,8 @@
   "publicReleaseRefSpec": [
     "^refs/heads/master$",
     "^refs/heads/release/.*$",
-    "^refs/heads/hotfix/.*$"
+    "^refs/heads/hotfix/.*$",
+    "^refs/tags/v\\d+\\.\\d+\\.\\d+$"
   ],
   "cloudBuild": {
     "buildNumber": {
