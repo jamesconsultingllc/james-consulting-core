@@ -28,6 +28,9 @@ permissions:
 
 env:
   PACKAGE_PROJECT: src/JamesConsulting/JamesConsulting.csproj
+  # Run JavaScript-based actions on Node.js 24 now (default starting June 2026).
+  # Silences the "Node.js 20 actions are deprecated" warning on the runner.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   SOLUTION: src/JamesConsulting.sln
   STABLE_BRANCH: master  # branch from which v* tags must be cut
 
