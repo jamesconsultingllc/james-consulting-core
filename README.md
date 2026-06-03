@@ -39,6 +39,7 @@ dotnet add package JamesConsulting
 | `JamesConsulting.Cryptography` | Hashing/encoding helpers on top of `string` |
 | `JamesConsulting.Hosting` | `HostExtensions`, `IHostInitializer` / `IHostInitializerAsync` — run async one-shot startup work inside `IHost` before `RunAsync()` |
 | `JamesConsulting.IO` | `StreamExtensions` (read-to-end, copy with progress, etc.) |
+| `JamesConsulting.Logging` | Buffering ("dump-on-error") logger — buffers Debug/Trace per scope and dumps them to your sinks only when an error is logged. See [Buffering logger](#buffering-dump-on-error-logger). |
 | `JamesConsulting.Net` | `ConnectToSharedFolder` — UNC/SMB credential impersonation. `Connect()` is Windows-only and throws `PlatformNotSupportedException` on macOS/Linux; `Dispose()` and the finalizer are safe no-ops on non-Windows. |
 | `JamesConsulting.Reflection` | `TypeExtensions` (default value resolution, async-method detection), `MethodInfoExtensions` |
 | `JamesConsulting.Security` | `SecureStringExtensions`, additional `StringExtensions` |
@@ -48,6 +49,102 @@ All public APIs ship with XML documentation; downstream consumers get IntelliSen
 step-into debugging.
 
 📚 **Full API reference:** **<https://docs.jamesconsulting.biz/james-consulting-core/>** (generated with DocFX from `master`).
+
+---
+
+## Buffering ("dump-on-error") logger
+
+`JamesConsulting.Logging` adds a logger that **buffers low-level logs in memory and only writes them
+when something goes wrong**. During normal operation your sinks stay quiet; the moment an `Error` (or
+`Critical`) is logged, the whole buffer of `Debug`/`Trace` context leading up to the failure is
+dumped — so you get rich diagnostics exactly when you need them, without the noise (or cost) the rest
+of the time.
+
+This is the **auto-flush-on-error** trigger that .NET's built-in log buffering doesn't provide (its
+buffer only flushes manually).
+
+### How records are routed
+
+Three configurable thresholds (`BufferLevel ≤ PassthroughLevel ≤ FlushLevel`) drive every record:
+
+| Record level | Behaviour |
+|---|---|
+| below `BufferLevel` | dropped |
+| `[BufferLevel, PassthroughLevel)` | captured into the active scope; emitted only on flush |
+| `[PassthroughLevel, FlushLevel)` | written through immediately (normal logging) |
+| at/above `FlushLevel` | flushes the scope (dumps the buffer), then writes the record |
+
+Defaults: `BufferLevel = Trace`, `PassthroughLevel = Information`, `FlushLevel = Error`.
+
+### Usage
+
+```csharp
+using JamesConsulting.Logging;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+services.AddLogging(logging =>
+{
+    logging.AddConsole();
+    logging.AddBufferingLogging(o =>
+    {
+        o.BufferLevel = LogLevel.Trace;
+        o.PassthroughLevel = LogLevel.Information;
+        o.FlushLevel = LogLevel.Error;
+    });
+});
+```
+
+By default `AddBufferingLogging` lowers the underlying logging filter for you (see the note below),
+so flushed `Debug`/`Trace` context actually reaches your sinks.
+
+Wrap a logical operation (request, message handler, job) in a buffering scope:
+
+```csharp
+public async Task ProcessAsync(ILogger<OrderService> logger, int orderId)
+{
+    using (LogBuffer.BeginScope())
+    {
+        logger.LogDebug("Loading order {OrderId}", orderId);     // buffered
+        logger.LogInformation("Order {OrderId} loaded", orderId); // written live
+
+        try
+        {
+            // ... work ...
+        }
+        catch (Exception ex)
+        {
+            // The buffered Debug record above is dumped first, then this error.
+            logger.LogError(ex, "Failed to process order {OrderId}", orderId);
+            throw;
+        }
+    }
+    // No error? The Debug record is discarded when the scope is disposed.
+}
+```
+
+> **Making sure dumped records reach your sinks.** The buffering logger decorates your existing
+> logger, so dumped records still pass through the pipeline's own level filter. A plain
+> `SetMinimumLevel(LogLevel.Trace)` is **not** enough — a configuration-bound `Logging:LogLevel:Default`
+> rule takes precedence over the minimum level and would silently discard the dump. By default
+> `ConfigureUnderlyingFilter` is enabled, so `AddBufferingLogging` appends a winning no-category filter
+> rule at your `BufferLevel`. Caveats: it does not override more specific category/provider rules
+> (e.g. `Logging:LogLevel:MyApp`) — for those, set a `Trace` rule yourself; the logger emits a one-time
+> warning if it detects a dump is being filtered out. Because the rule is level-based, it also makes
+> passthrough-band records visible live where a higher configured default would have hidden them. The
+> decorator still holds back live emission of anything below `PassthroughLevel`, so your sinks stay
+> quiet until a flush. Set `ConfigureUnderlyingFilter = false` to manage the filter yourself.
+
+> **Replay fidelity.** Object-valued structured properties (e.g. `logger.LogDebug("processing {Order}",
+> order)`) are frozen to their `ToString()` text at log time so a later mutation can't change what the
+> dump reports — a destructuring sink therefore receives the frozen text, not the live object. Scalar
+> values (strings, numbers, enums, `DateTime`, `Guid`, …) keep their original type. Records are replayed
+> in chronological order within a logical flow (nested scopes dump ancestors first); ordering is
+> best-effort under concurrent logging on the same scope.
+
+Buffering is AsyncLocal-scoped (it flows across `await`), thread-safe, and bounded by a ring buffer
+(default capacity 1000, drop-oldest on overflow). Buffered records do **not** capture
+`ILogger.BeginScope` state — matching the built-in .NET buffering.
 
 ---
 
@@ -101,48 +198,16 @@ dotnet test --filter "FullyQualifiedName~ObjectExtensionsTests.Mask"
 
 ---
 
-## Release process
-
-Releases follow GitFlow + semver. The `ci.yml` workflow has three jobs:
-
-| Trigger | Job | Output |
-|---|---|---|
-| Any push / PR / dispatch | `build-test` | Build, test, Sonar, coverage, preview pack (`*-ci.<run_number>`). Runs on every push. |
-| Push to `release/**` | `publish-rc` | Signs and publishes `<MAJOR>.<MINOR>.<PATCH>-rc.<run_number>` via NuGet Trusted Publishing. |
-| Push tag `v<MAJOR>.<MINOR>.<PATCH>` | `publish-stable` | Verifies tag matches `version.json` *and* that the tagged commit is reachable from `master`, then signs and publishes. Also creates a GitHub Release. |
-
-Cutting a release:
-
-```bash
-# 1. cut release branch from develop
-git switch develop && git pull
-git switch -c release/2.0.0
-git push -u origin release/2.0.0
-# -> publish-rc fires automatically: 2.0.0-rc.<run>
-
-# 2. when QA approves, merge release/2.0.0 -> master, then tag from master
-git switch master && git pull
-git tag v2.0.0
-git push origin v2.0.0
-# -> publish-stable fires: 2.0.0 stable + GitHub Release
-
-# 3. back-merge master -> develop
-git switch develop
-git merge --no-ff master
-git push
-```
-
-> The major.minor.patch number lives in [`version.json`](version.json). Bump it before opening the
-> release branch.
-
----
-
 ## Contributing
 
-1. Branch from `develop` (`feature/<name>` or `bugfix/<name>`).
+1. Branch from `develop` (`feature/<name>` or `bugfix/<name>`, or a child of another development
+   branch). All work targets `develop` — never branch from or push to `master`.
 2. Tests first — this repo follows BDD/TDD with a 90% coverage target.
 3. Run `dotnet build` and `dotnet test` locally before pushing.
 4. Open a PR into `develop`. CI must be green and Sonar quality gate must pass.
+
+> Releasing (cutting `release/**` branches, merging into `master`, and tagging) is restricted to the
+> maintainer, James Consulting LLC. Contributions stop at a PR into `develop`.
 
 Repo conventions live in [`AGENTS.md`](AGENTS.md).
 
