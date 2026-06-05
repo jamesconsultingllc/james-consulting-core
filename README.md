@@ -65,16 +65,20 @@ buffer only flushes manually).
 
 ### How records are routed
 
-Three configurable thresholds (`BufferLevel ≤ PassthroughLevel ≤ FlushLevel`) drive every record:
+Your host's existing live logging configuration (e.g. `Logging:LogLevel:Default`) stays **completely
+authoritative** for what is written live — buffering never overrides it. On top of that, two
+thresholds (`BufferLevel ≤ FlushLevel`) drive capture and the dump trigger:
 
 | Record level | Behaviour |
 |---|---|
+| written live by your configuration | written live as normal (buffering doesn't touch it) |
+| below the live threshold but `≥ BufferLevel` | captured into the active scope; emitted only on flush |
 | below `BufferLevel` | dropped |
-| `[BufferLevel, PassthroughLevel)` | captured into the active scope; emitted only on flush |
-| `[PassthroughLevel, FlushLevel)` | written through immediately (normal logging) |
-| at/above `FlushLevel` | flushes the scope (dumps the buffer), then writes the record |
+| `≥ FlushLevel`, inside a scope | flushes the scope (dumps the buffer + the triggering record) |
+| `≥ FlushLevel`, no scope | follows your live configuration (nothing to dump) |
 
-Defaults: `BufferLevel = Trace`, `PassthroughLevel = Information`, `FlushLevel = Error`.
+Defaults: `BufferLevel = Trace`, `FlushLevel = Error`. The live threshold is whatever your
+`Logging:LogLevel` configuration already says.
 
 ### Usage
 
@@ -88,15 +92,14 @@ services.AddLogging(logging =>
     logging.AddConsole();
     logging.AddBufferingLogging(o =>
     {
-        o.BufferLevel = LogLevel.Trace;
-        o.PassthroughLevel = LogLevel.Information;
-        o.FlushLevel = LogLevel.Error;
+        o.BufferLevel = LogLevel.Trace;  // how deep to capture
+        o.FlushLevel = LogLevel.Error;   // what triggers the dump
     });
 });
 ```
 
-By default `AddBufferingLogging` lowers the underlying logging filter for you (see the note below),
-so flushed `Debug`/`Trace` context actually reaches your sinks.
+Your `Logging:LogLevel` configuration continues to control live logging unchanged — set it to
+`Information` (or whatever you like) and `Debug`/`Trace` are buffered, then dumped on error.
 
 Wrap a logical operation (request, message handler, job) in a buffering scope:
 
@@ -123,17 +126,14 @@ public async Task ProcessAsync(ILogger<OrderService> logger, int orderId)
 }
 ```
 
-> **Making sure dumped records reach your sinks.** The buffering logger decorates your existing
-> logger, so dumped records still pass through the pipeline's own level filter. A plain
-> `SetMinimumLevel(LogLevel.Trace)` is **not** enough — a configuration-bound `Logging:LogLevel:Default`
-> rule takes precedence over the minimum level and would silently discard the dump. By default
-> `ConfigureUnderlyingFilter` is enabled, so `AddBufferingLogging` appends a winning no-category filter
-> rule at your `BufferLevel`. Caveats: it does not override more specific category/provider rules
-> (e.g. `Logging:LogLevel:MyApp`) — for those, set a `Trace` rule yourself; the logger emits a one-time
-> warning if it detects a dump is being filtered out. Because the rule is level-based, it also makes
-> passthrough-band records visible live where a higher configured default would have hidden them. The
-> decorator still holds back live emission of anything below `PassthroughLevel`, so your sinks stay
-> quiet until a flush. Set `ConfigureUnderlyingFilter = false` to manage the filter yourself.
+> **Dumped records always reach your sinks — no filter configuration required.** The error dump is
+> replayed **directly to the registered logging providers**, bypassing the
+> Microsoft.Extensions.Logging factory-level filters (the `Logging:LogLevel` category/provider rules).
+> That is deliberate: the whole point of a dump-on-error buffer is to surface the low-level context
+> your live configuration suppresses, so a plain `Logging:LogLevel:Default = Information` setting is all
+> you need — buffered `Debug`/`Trace` still appears on error. One consequence: an error replays the
+> buffered context to **every** registered provider, even one whose own configured level would normally
+> exclude those records.
 
 > **Replay fidelity.** Object-valued structured properties (e.g. `logger.LogDebug("processing {Order}",
 > order)`) are frozen to their `ToString()` text at log time so a later mutation can't change what the

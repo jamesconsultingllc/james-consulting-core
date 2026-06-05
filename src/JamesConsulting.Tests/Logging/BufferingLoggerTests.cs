@@ -14,13 +14,25 @@ namespace JamesConsulting.Tests.Logging;
 /// </summary>
 public class BufferingLoggerTests
 {
-    private readonly RecordingLogger inner = new();
+    // The inner logger models the host's live configuration (Information threshold); the replay
+    // target models the direct provider replay that records every dumped record (Trace). Both append
+    // to one shared, ordered list, so assertions on `inner.Records` see live writes and dumped
+    // records interleaved in the exact order they reached the sinks.
+    private readonly List<RecordedLog> records = new();
+    private readonly RecordingLogger inner;
+    private readonly RecordingLogger replay;
+
+    public BufferingLoggerTests()
+    {
+        inner = new RecordingLogger(LogLevel.Information, records);
+        replay = new RecordingLogger(LogLevel.Trace, records);
+    }
 
     private BufferingLogger CreateLogger(Action<BufferingLoggerOptions>? configure = null)
     {
         var options = new BufferingLoggerOptions();
         configure?.Invoke(options);
-        return new BufferingLogger(inner, options);
+        return new BufferingLogger(inner, replay, options);
     }
 
     /// <summary>
@@ -29,7 +41,18 @@ public class BufferingLoggerTests
     [Fact]
     public void ConstructorNullInnerThrows()
     {
-        var act = () => new BufferingLogger(null!, new BufferingLoggerOptions());
+        var act = () => new BufferingLogger(null!, replay, new BufferingLoggerOptions());
+
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    /// <summary>
+    /// A null replay target is rejected.
+    /// </summary>
+    [Fact]
+    public void ConstructorNullReplayTargetThrows()
+    {
+        var act = () => new BufferingLogger(inner, null!, new BufferingLoggerOptions());
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -40,7 +63,7 @@ public class BufferingLoggerTests
     [Fact]
     public void ConstructorNullOptionsThrows()
     {
-        var act = () => new BufferingLogger(inner, null!);
+        var act = () => new BufferingLogger(inner, replay, null!);
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -53,13 +76,14 @@ public class BufferingLoggerTests
     {
         var options = new BufferingLoggerOptions { FlushLevel = LogLevel.None };
 
-        var act = () => new BufferingLogger(inner, options);
+        var act = () => new BufferingLogger(inner, replay, options);
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     /// <summary>
-    /// Passthrough-level records are written through immediately, even without a scope.
+    /// Records the host configuration already writes live (here Information) are written through
+    /// immediately, even without a scope.
     /// </summary>
     [Fact]
     public void InformationIsWrittenLive()
@@ -137,20 +161,23 @@ public class BufferingLoggerTests
     }
 
     /// <summary>
-    /// After a flush, buffer-range records are written live when suspend-after-flush is enabled.
+    /// After a flush, a buffer-range record the host configuration does not write live is dropped
+    /// (the host <c>LogLevel</c> stays authoritative once buffering is suspended), while a record the
+    /// host does write live still goes through.
     /// </summary>
     [Fact]
-    public void SuspendAfterFlushWritesSubsequentDebugLive()
+    public void SuspendAfterFlushDropsBelowLiveButWritesLive()
     {
         var logger = CreateLogger(o => o.SuspendBufferingAfterFlush = true);
 
         using (LogBuffer.BeginScope())
         {
             logger.LogError("boom");
-            logger.LogDebug("after");
+            logger.LogDebug("after");            // below the live threshold and buffering is suspended -> dropped
+            logger.LogInformation("after-info"); // at/above the live threshold -> written live
         }
 
-        inner.Records.Select(r => r.Message).Should().Equal("boom", "after");
+        inner.Records.Select(r => r.Message).Should().Equal("boom", "after-info");
     }
 
     /// <summary>
@@ -255,18 +282,27 @@ public class BufferingLoggerTests
     }
 
     /// <summary>
-    /// Flush-level records are always enabled so the dump can be triggered, even if the inner logger
-    /// would filter them.
+    /// Flush-level <see cref="ILogger.IsEnabled" /> reflects the host configuration when there is no
+    /// scope, but is forced true while a scope is active so the dump can always be triggered — even
+    /// if the inner logger would filter the level.
     /// </summary>
     [Fact]
-    public void IsEnabledErrorTrueEvenWhenInnerDisabled()
+    public void IsEnabledErrorReflectsScopeWhenInnerDisabled()
     {
         // An inner logger whose threshold is None is never enabled for any real level.
         var quietInner = new RecordingLogger(LogLevel.None);
-        var logger = new BufferingLogger(quietInner, new BufferingLoggerOptions());
+        var logger = new BufferingLogger(quietInner, replay, new BufferingLoggerOptions());
 
         quietInner.IsEnabled(LogLevel.Error).Should().BeFalse();
-        logger.IsEnabled(LogLevel.Error).Should().BeTrue();
+
+        // No scope: nothing to dump, so the host configuration is authoritative -> disabled.
+        logger.IsEnabled(LogLevel.Error).Should().BeFalse();
+
+        // Active scope: the record can trigger a dump, so it is enabled regardless of the host filter.
+        using (LogBuffer.BeginScope())
+        {
+            logger.IsEnabled(LogLevel.Error).Should().BeTrue();
+        }
     }
 
     /// <summary>
@@ -277,9 +313,13 @@ public class BufferingLoggerTests
     {
         var logger = CreateLogger();
 
+        // The inner RecordingLogger returns a shared sentinel from BeginScope; if the decorator
+        // delegates, it returns that same instance rather than a scope of its own.
+        var expected = inner.BeginScope("sentinel");
+
         using var scope = logger.BeginScope("state");
 
-        scope.Should().NotBeNull();
+        scope.Should().BeSameAs(expected);
     }
 
     /// <summary>
@@ -298,13 +338,15 @@ public class BufferingLoggerTests
         }
 
         inner.Records.Should().Contain(r => r.Level == LogLevel.Error && r.Message == "boom");
-        // The ring buffer is bounded, so at most capacity debug records are dumped.
-        inner.Records.Count(r => r.Level == LogLevel.Debug).Should().BeLessThanOrEqualTo(256);
+        // All 1000 debug records are enqueued (under lock) before the error triggers the dump, so the
+        // bounded ring buffer holds exactly its capacity and dumps that many — proving records were
+        // actually buffered and replayed, not silently lost.
+        inner.Records.Count(r => r.Level == LogLevel.Debug).Should().Be(256);
     }
 
     /// <summary>
     /// An error with an empty buffer still suspends buffering for the rest of the scope, so a
-    /// subsequent buffer-range record is written live rather than re-buffered.
+    /// subsequent buffer-range record below the live threshold is dropped rather than re-buffered.
     /// </summary>
     [Fact]
     public void EmptyErrorFlushSuspendsBuffering()
@@ -316,7 +358,7 @@ public class BufferingLoggerTests
         logger.LogDebug("after");
 
         scope.IsFlushed.Should().BeTrue();
-        inner.Records.Select(r => r.Message).Should().Equal("boom", "after");
+        inner.Records.Select(r => r.Message).Should().Equal("boom");
     }
 
     /// <summary>
@@ -395,7 +437,7 @@ public class BufferingLoggerTests
     [Fact]
     public void FaultyReplaySinkDoesNotBreakDump()
     {
-        inner.ThrowOn = (level, message) => level == LogLevel.Debug && message == "a";
+        replay.ThrowOn = (level, message) => level == LogLevel.Debug && message == "a";
         var logger = CreateLogger();
 
         using (LogBuffer.BeginScope())
@@ -432,6 +474,46 @@ public class BufferingLoggerTests
         }
 
         inner.Records.Select(r => r.Message).Should().Equal("rendered", "boom");
+    }
+
+    /// <summary>
+    /// With no active scope, a flush-level record honors the host configuration exactly: an inner
+    /// logger that suppresses the level (the host <c>LogLevel</c> stays authoritative) drops it, since
+    /// there is no buffered context to dump.
+    /// </summary>
+    [Fact]
+    public void NoScopeFlushLevelHonorsHostFilterWhenSuppressed()
+    {
+        var shared = new List<RecordedLog>();
+        var quietInner = new RecordingLogger(LogLevel.Critical, shared);
+        var quietReplay = new RecordingLogger(LogLevel.Trace, shared);
+        var logger = new BufferingLogger(quietInner, quietReplay, new BufferingLoggerOptions());
+
+        logger.LogError("boom");
+
+        shared.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// With an active scope, an error dumps the buffered context and the triggering record directly
+    /// to the replay target, bypassing the host filter — so suppressed low-level context and the
+    /// error both surface even when the inner logger would filter every one of them.
+    /// </summary>
+    [Fact]
+    public void ScopedErrorDumpsViaReplayBypassingHostFilter()
+    {
+        var shared = new List<RecordedLog>();
+        var quietInner = new RecordingLogger(LogLevel.Critical, shared);
+        var quietReplay = new RecordingLogger(LogLevel.Trace, shared);
+        var logger = new BufferingLogger(quietInner, quietReplay, new BufferingLoggerOptions());
+
+        using (LogBuffer.BeginScope())
+        {
+            logger.LogDebug("ctx");
+            logger.LogError("boom");
+        }
+
+        shared.Select(r => r.Message).Should().Equal("ctx", "boom");
     }
 
     private sealed class ThrowingEnumerableState : IReadOnlyList<KeyValuePair<string, object?>>

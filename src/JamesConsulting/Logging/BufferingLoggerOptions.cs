@@ -8,37 +8,50 @@ namespace JamesConsulting.Logging;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The buffering logger routes each record using three thresholds, which must satisfy the
-/// invariant <c>BufferLevel &lt;= PassthroughLevel &lt;= FlushLevel</c>:
+/// The buffering logger leaves your host's live logging threshold (for example
+/// <c>Logging:LogLevel:Default</c>) completely untouched and authoritative — that configuration
+/// still decides which records are written live, exactly as it does without buffering. On top of
+/// that, two thresholds control buffering, which must satisfy <c>BufferLevel &lt;= FlushLevel</c>:
 /// </para>
 /// <list type="bullet">
 ///     <item>
-///         Records below <see cref="BufferLevel" /> are dropped.
+///         A record whose level your live configuration would already write is written live as
+///         normal — buffering does not change it.
 ///     </item>
 ///     <item>
-///         Records in the range <c>[BufferLevel, PassthroughLevel)</c> are captured into the
-///         active <see cref="LogBufferScope" /> and only emitted if a flush occurs.
+///         A record <em>below</em> the live threshold but at or above <see cref="BufferLevel" /> is
+///         captured into the active <see cref="LogBufferScope" /> (and dropped if no scope is
+///         active), so it is only emitted if a flush occurs.
 ///     </item>
 ///     <item>
-///         Records in the range <c>[PassthroughLevel, FlushLevel)</c> are written through to the
-///         inner logger immediately (normal logging).
+///         A record below <see cref="BufferLevel" /> is dropped.
 ///     </item>
 ///     <item>
-///         Records at or above <see cref="FlushLevel" /> flush the active scope (emitting every
-///         buffered record) and are then written through immediately.
+///         A record at or above <see cref="FlushLevel" /> that occurs inside an active scope flushes
+///         that scope: every buffered record — and the triggering record — is replayed directly to
+///         the registered logging providers so you get the diagnostic context leading up to the
+///         failure. Outside a scope there is nothing to dump, so the record follows your normal live
+///         configuration.
 ///     </item>
 /// </list>
 /// <para>
-/// Because the buffering logger decorates the inner <see cref="ILogger" />, replayed records still
-/// pass through the inner logger's own level filtering. A plain
-/// <c>SetMinimumLevel(LogLevel.Trace)</c> is <em>not</em> sufficient: when the host binds a
-/// configuration section such as <c>Logging:LogLevel:Default</c>, the resulting catch-all filter
-/// rule takes precedence over the minimum level, so flushed Debug/Trace records are silently
-/// discarded. Instead, ensure a filter <em>rule</em> at <see cref="BufferLevel" /> applies to the
-/// buffered categories — for example set <c>Logging:LogLevel:Default</c> to <c>Trace</c>, or call
-/// <c>AddFilter(null, LogLevel.Trace)</c>. By default <see cref="ConfigureUnderlyingFilter" /> wires
-/// this up for you. During normal operation nothing below <see cref="PassthroughLevel" /> is
-/// forwarded to the inner logger, so your sinks stay quiet until a flush is triggered.
+/// The replayed dump is written <em>directly</em> to the registered providers and therefore bypasses
+/// the Microsoft.Extensions.Logging factory-level filters (category, provider, and
+/// <c>Logging:LogLevel</c> rules). This is deliberate: the whole point of a dump-on-error buffer is
+/// to surface low-level context that your live configuration suppresses, so no extra filter
+/// configuration is required for the dump to reach your sinks. It also means an error replays the
+/// buffered context to every registered provider, even one whose own configured level would normally
+/// exclude those records.
+/// </para>
+/// <para>
+/// The filter bypass extends to the triggering record itself. <em>Inside an active scope</em>, a
+/// record at or above <see cref="FlushLevel" /> is force-routed to every registered provider together
+/// with the dump, and <see cref="BufferingLogger.IsEnabled" /> reports <c>true</c> for flush-level
+/// records whenever a scope is active. So if your configuration has silenced a category or provider,
+/// an error logged in that category inside a scope <em>still emits</em> — the error and its buffered
+/// context, to every provider — because the trigger must reach the same sinks that just received its
+/// context. The same flush-level record logged <em>outside</em> a scope honors your live
+/// configuration normally.
 /// </para>
 /// </remarks>
 public sealed class BufferingLoggerOptions
@@ -50,79 +63,45 @@ public sealed class BufferingLoggerOptions
     public LogLevel BufferLevel { get; set; } = LogLevel.Trace;
 
     /// <summary>
-    /// Gets or sets the level at or above which records are always written through to the inner
-    /// logger immediately (normal logging). Defaults to <see cref="LogLevel.Information" />.
-    /// </summary>
-    public LogLevel PassthroughLevel { get; set; } = LogLevel.Information;
-
-    /// <summary>
     /// Gets or sets the level at or above which a record flushes the active
-    /// <see cref="LogBufferScope" />, emitting every buffered record before the triggering record is
-    /// written. Defaults to <see cref="LogLevel.Error" />.
+    /// <see cref="LogBufferScope" />, replaying every buffered record and the triggering record
+    /// directly to the registered providers. Defaults to <see cref="LogLevel.Error" />.
     /// </summary>
     public LogLevel FlushLevel { get; set; } = LogLevel.Error;
 
     /// <summary>
     /// Gets or sets a value indicating whether buffering is suspended for the remainder of a scope
     /// after it has been flushed. When <c>true</c> (the default), buffer-range records that occur
-    /// after a flush are written through live instead of re-buffered, matching the behaviour of the
-    /// built-in .NET log buffering. When <c>false</c>, the scope resumes buffering after a flush.
-    /// </summary>
-    public bool SuspendBufferingAfterFlush { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether <c>AddBufferingLogging</c> automatically lowers the
-    /// underlying logging filter so that flushed buffer-range records can reach your sinks. When
-    /// <c>true</c> (the default), a catch-all filter rule at <see cref="BufferLevel" /> is appended
-    /// as the last (and therefore winning) <em>no-category</em> rule, and the minimum level is
-    /// lowered to <see cref="BufferLevel" /> if it was higher.
+    /// after a flush honor the host's live configuration instead of being re-buffered (so a record
+    /// below the live threshold is dropped), matching the behaviour of the built-in .NET log
+    /// buffering. When <c>false</c>, the scope resumes buffering after a flush.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// This wins over a configuration-bound <c>Logging:LogLevel:Default</c> rule, but it does
-    /// <em>not</em> override more specific category- or provider-scoped rules (for example
-    /// <c>Logging:LogLevel:MyApp</c> or <c>Logging:Console:LogLevel:Default</c>); dumps for those
-    /// categories remain filtered, and the buffering logger emits a one-time warning when it detects
-    /// this.
-    /// </para>
-    /// <para>
-    /// Because the rule is level-based, lowering the effective default filter also makes
-    /// passthrough-band records (at or above <see cref="PassthroughLevel" />) visible live where a
-    /// higher configured default level would have suppressed them. Set this to <c>false</c> if you
-    /// need to control the underlying filter yourself; in that case you must ensure a filter rule at
-    /// <see cref="BufferLevel" /> applies to the buffered categories, otherwise dumped context is
-    /// discarded by the inner logger's filtering.
-    /// </para>
+    /// A consequence of the default <c>true</c> is that a scope dumps context at most once: after the
+    /// first flush no further records are buffered, so a second error later in the same long-lived
+    /// scope dumps nothing. Use one scope per logical operation (or set this to <c>false</c>) if you
+    /// want every error to carry its own buffered context.
     /// </remarks>
-    public bool ConfigureUnderlyingFilter { get; set; } = true;
+    public bool SuspendBufferingAfterFlush { get; set; } = true;
 
     /// <summary>
     /// Validates that the configured thresholds satisfy the required invariant.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// Any threshold is <see cref="LogLevel.None" />, or the invariant
-    /// <c>BufferLevel &lt;= PassthroughLevel &lt;= FlushLevel</c> is violated.
+    /// <see cref="BufferLevel" /> or <see cref="FlushLevel" /> is <see cref="LogLevel.None" />, or
+    /// the invariant <c>BufferLevel &lt;= FlushLevel</c> is violated.
     /// </exception>
     public void Validate()
     {
         EnsureReal(BufferLevel, nameof(BufferLevel));
-        EnsureReal(PassthroughLevel, nameof(PassthroughLevel));
         EnsureReal(FlushLevel, nameof(FlushLevel));
 
-        if (BufferLevel > PassthroughLevel)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(PassthroughLevel),
-                PassthroughLevel,
-                $"{nameof(PassthroughLevel)} ({PassthroughLevel}) must be greater than or equal to {nameof(BufferLevel)} ({BufferLevel}).");
-        }
-
-        if (PassthroughLevel > FlushLevel)
+        if (BufferLevel > FlushLevel)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(FlushLevel),
                 FlushLevel,
-                $"{nameof(FlushLevel)} ({FlushLevel}) must be greater than or equal to {nameof(PassthroughLevel)} ({PassthroughLevel}).");
+                $"{nameof(FlushLevel)} ({FlushLevel}) must be greater than or equal to {nameof(BufferLevel)} ({BufferLevel}).");
         }
     }
 

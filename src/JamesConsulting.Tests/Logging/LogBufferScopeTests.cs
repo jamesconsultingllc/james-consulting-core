@@ -12,10 +12,19 @@ namespace JamesConsulting.Tests.Logging;
 /// </summary>
 public class LogBufferScopeTests
 {
-    private readonly RecordingLogger inner = new();
+    private readonly RecordingLogger inner;
     private readonly BufferingLogger logger;
 
-    public LogBufferScopeTests() => logger = new BufferingLogger(inner, new BufferingLoggerOptions());
+    public LogBufferScopeTests()
+    {
+        // Inner models the host live threshold (Information) so Debug/Trace are buffered rather than
+        // written live; the replay target records the dump. Both share one ordered list, so
+        // `inner.Records` observes exactly what reached the sinks, in order.
+        var records = new System.Collections.Generic.List<RecordedLog>();
+        inner = new RecordingLogger(LogLevel.Information, records);
+        var replay = new RecordingLogger(LogLevel.Trace, records);
+        logger = new BufferingLogger(inner, replay, new BufferingLoggerOptions());
+    }
 
     /// <summary>
     /// <see cref="LogBuffer.BeginScope()" /> uses the default capacity and becomes the current scope.
@@ -142,6 +151,42 @@ public class LogBufferScopeTests
         }
 
         LogBuffer.Current.Should().BeSameAs(outer);
+    }
+
+    /// <summary>
+    /// Disposing scopes out of order never leaves <see cref="LogBuffer.Current" /> pointing at a
+    /// disposed scope: when the inner scope is disposed after its already-disposed parent, the
+    /// ambient slot skips the disposed parent and restores the next live ancestor (here, none).
+    /// </summary>
+    [Fact]
+    public void OutOfOrderDisposalSkipsDisposedAncestor()
+    {
+        var outer = LogBuffer.BeginScope();
+        var innerScope = LogBuffer.BeginScope();
+
+        outer.Dispose();
+        LogBuffer.Current.Should().BeSameAs(innerScope);
+
+        innerScope.Dispose();
+        LogBuffer.Current.Should().BeNull();
+    }
+
+    /// <summary>
+    /// With three nested scopes, disposing the middle one out of order makes the innermost restore
+    /// the live grandparent (skipping the disposed middle scope) rather than a disposed scope.
+    /// </summary>
+    [Fact]
+    public void OutOfOrderDisposalRestoresNearestLiveAncestor()
+    {
+        using var root = LogBuffer.BeginScope();
+        var middle = LogBuffer.BeginScope();
+        var innermost = LogBuffer.BeginScope();
+
+        middle.Dispose();
+        LogBuffer.Current.Should().BeSameAs(innermost);
+
+        innermost.Dispose();
+        LogBuffer.Current.Should().BeSameAs(root);
     }
 
     /// <summary>

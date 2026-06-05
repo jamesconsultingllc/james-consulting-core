@@ -12,10 +12,15 @@ namespace JamesConsulting.Tests.Logging;
 internal sealed class RecordingLogger : ILogger
 {
     private readonly LogLevel enabledFrom;
+    private readonly List<RecordedLog> records;
 
-    public RecordingLogger(LogLevel enabledFrom = LogLevel.Trace) => this.enabledFrom = enabledFrom;
+    public RecordingLogger(LogLevel enabledFrom = LogLevel.Trace, List<RecordedLog>? sharedSink = null)
+    {
+        this.enabledFrom = enabledFrom;
+        records = sharedSink ?? new List<RecordedLog>();
+    }
 
-    public List<RecordedLog> Records { get; } = new();
+    public List<RecordedLog> Records => records;
 
     /// <summary>
     /// Optional hook that, when it returns <c>true</c> for a given level and rendered message, makes
@@ -35,6 +40,15 @@ internal sealed class RecordingLogger : ILogger
         Exception? exception,
         Func<TState, Exception?, string> formatter)
     {
+        // Model a real logger's own level filtering so the inner-logger path faithfully drops
+        // records the host configuration would suppress. The replay target is constructed enabled
+        // from Trace, so it records every dumped record unconditionally (mirroring the direct
+        // provider replay, which bypasses the factory filters).
+        if (!IsEnabled(logLevel))
+        {
+            return;
+        }
+
         var message = formatter(state, exception);
 
         if (ThrowOn?.Invoke(logLevel, message) == true)
@@ -45,7 +59,7 @@ internal sealed class RecordingLogger : ILogger
         IReadOnlyList<KeyValuePair<string, object?>>? structured =
             state as IReadOnlyList<KeyValuePair<string, object?>>;
 
-        Records.Add(new RecordedLog(logLevel, eventId, message, exception, structured));
+        records.Add(new RecordedLog(logLevel, eventId, message, exception, structured));
     }
 
     private sealed class NullScope : IDisposable

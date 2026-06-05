@@ -12,20 +12,13 @@ namespace JamesConsulting.Logging;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Buffering works by holding back low-level records and only emitting them when an error triggers
-/// a flush. For flushed records to reach your sinks, a filter <em>rule</em> at your
-/// <see cref="BufferingLoggerOptions.BufferLevel" /> must apply to the buffered categories. A plain
-/// <c>SetMinimumLevel(LogLevel.Trace)</c> is not enough, because a configuration-provided rule such
-/// as <c>Logging:LogLevel:Default</c> takes precedence over the minimum level. By default
-/// <see cref="BufferingLoggerOptions.ConfigureUnderlyingFilter" /> is enabled, so this method
-/// appends a winning no-category filter rule at <see cref="BufferingLoggerOptions.BufferLevel" /> for
-/// you. Note this only beats the no-category <c>Default</c> rule, not more specific category- or
-/// provider-scoped rules, and (being level-based) it also surfaces passthrough-band records that a
-/// higher configured default would have hidden — see
-/// <see cref="BufferingLoggerOptions.ConfigureUnderlyingFilter" />. The buffering logger still
-/// suppresses live emission of records below
-/// <see cref="BufferingLoggerOptions.PassthroughLevel" />, so your sinks stay quiet until a flush
-/// occurs.
+/// Buffering leaves your host's live logging configuration (for example <c>Logging:LogLevel</c>)
+/// untouched and authoritative: records that configuration would write are written live exactly as
+/// before. Low-level records below the live threshold are held back and only emitted when an error
+/// triggers a flush, at which point the buffered context — and the triggering record — are replayed
+/// <em>directly</em> to the registered logging providers, bypassing the
+/// Microsoft.Extensions.Logging factory filters. That direct replay is why no extra filter
+/// configuration is required for flushed records to reach your sinks.
 /// </para>
 /// </remarks>
 public static class BufferingLoggerServiceCollectionExtensions
@@ -48,17 +41,18 @@ public static class BufferingLoggerServiceCollectionExtensions
     {
         Guard.NotNull(services);
 
-        var options = new BufferingLoggerOptions();
-        configure?.Invoke(options);
-        options.Validate();
-
         if (services.Any(d => d.ServiceType == typeof(BufferingLoggingMarker)))
         {
             // Idempotent: a previous AddBufferingLogging call already decorated the factory. Decorating
             // again would nest BufferingLoggers and replay buffered records through a second buffer.
-            // The first registration wins.
+            // The first registration wins, so subsequent calls are ignored before any options are
+            // configured or validated.
             return services;
         }
+
+        var options = new BufferingLoggerOptions();
+        configure?.Invoke(options);
+        options.Validate();
 
         var descriptor = services.LastOrDefault(d => d.ServiceType == typeof(ILoggerFactory));
         if (descriptor is null)
@@ -70,33 +64,12 @@ public static class BufferingLoggerServiceCollectionExtensions
         services.Remove(descriptor);
         services.Add(new ServiceDescriptor(
             typeof(ILoggerFactory),
-            provider => new BufferingLoggerFactory(ResolveInner(provider, descriptor), options),
+            provider => new BufferingLoggerFactory(
+                ResolveInner(provider, descriptor),
+                provider.GetServices<ILoggerProvider>(),
+                options),
             descriptor.Lifetime));
         services.Add(new ServiceDescriptor(typeof(BufferingLoggingMarker), new BufferingLoggingMarker()));
-
-        if (options.ConfigureUnderlyingFilter)
-        {
-            var bufferLevel = options.BufferLevel;
-
-            // Lower the underlying logging filter so flushed buffer-range records can reach sinks.
-            // PostConfigure runs after every Configure callback (including configuration binding of
-            // Logging:LogLevel sections), so our catch-all rule is appended last and therefore wins
-            // the "take the last matching rule" tie-break. SetMinimumLevel/MinLevel alone is bypassed
-            // whenever a matching rule (e.g. a bound Default rule) exists.
-            services.PostConfigure<LoggerFilterOptions>(filterOptions =>
-            {
-                if (filterOptions.MinLevel > bufferLevel)
-                {
-                    filterOptions.MinLevel = bufferLevel;
-                }
-
-                filterOptions.Rules.Add(new LoggerFilterRule(
-                    providerName: null,
-                    categoryName: null,
-                    logLevel: bufferLevel,
-                    filter: null));
-            });
-        }
 
         return services;
     }

@@ -11,8 +11,9 @@ internal enum LogBufferEnqueueResult
     Enqueued,
 
     /// <summary>
-    /// The scope was already flushed and buffering is suspended; the caller should emit the record
-    /// live instead of buffering it.
+    /// The scope was already flushed and buffering is suspended, so the record was not buffered. The
+    /// host's live configuration stays authoritative for it; because it is below the live threshold
+    /// it is effectively dropped.
     /// </summary>
     AlreadyFlushed,
 

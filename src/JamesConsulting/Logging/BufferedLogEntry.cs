@@ -23,15 +23,15 @@ internal sealed class BufferedLogEntry
     private static readonly Func<object?, Exception?, string> ReplayFormatter =
         static (state, _) => state?.ToString() ?? string.Empty;
 
-    private readonly ILogger inner;
+    private readonly ILogger replayTarget;
     private readonly LogLevel level;
     private readonly EventId eventId;
     private readonly Exception? exception;
     private readonly object? state;
 
-    private BufferedLogEntry(ILogger inner, LogLevel level, EventId eventId, object? state, Exception? exception)
+    private BufferedLogEntry(ILogger replayTarget, LogLevel level, EventId eventId, object? state, Exception? exception)
     {
-        this.inner = inner;
+        this.replayTarget = replayTarget;
         this.level = level;
         this.eventId = eventId;
         this.state = state;
@@ -43,7 +43,7 @@ internal sealed class BufferedLogEntry
     /// state so the entry can be replayed safely later.
     /// </summary>
     /// <typeparam name="TState">The type of the original log state.</typeparam>
-    /// <param name="inner">The inner logger that the entry replays to (the originating category).</param>
+    /// <param name="replayTarget">The logger the entry replays to during a flush (the originating category, written directly to the providers).</param>
     /// <param name="level">The original log level.</param>
     /// <param name="eventId">The original event id.</param>
     /// <param name="state">The original log state.</param>
@@ -51,7 +51,7 @@ internal sealed class BufferedLogEntry
     /// <param name="exception">The original exception, if any.</param>
     /// <returns>An immutable <see cref="BufferedLogEntry" />.</returns>
     public static BufferedLogEntry Create<TState>(
-        ILogger inner,
+        ILogger replayTarget,
         LogLevel level,
         EventId eventId,
         TState state,
@@ -73,7 +73,7 @@ internal sealed class BufferedLogEntry
             snapshot = message;
         }
 
-        return new BufferedLogEntry(inner, level, eventId, snapshot, exception);
+        return new BufferedLogEntry(replayTarget, level, eventId, snapshot, exception);
     }
 
     private static KeyValuePair<string, object?>[] Freeze(IEnumerable<KeyValuePair<string, object?>> structured)
@@ -112,10 +112,10 @@ internal sealed class BufferedLogEntry
     }
 
     /// <summary>
-    /// Replays the buffered record to its originating inner logger, preserving the original level,
-    /// event id, message, structured state, and exception.
+    /// Replays the buffered record to its replay target, preserving the original level, event id,
+    /// message, structured state, and exception.
     /// </summary>
-    public void Replay() => inner.Log(level, eventId, state, exception, ReplayFormatter);
+    public void Replay() => replayTarget.Log(level, eventId, state, exception, ReplayFormatter);
 
     /// <summary>
     /// A defensive copy of a structured log state that preserves the original key/value pairs and

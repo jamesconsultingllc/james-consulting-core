@@ -55,12 +55,21 @@ public static class LogBuffer
     /// Restores the previous ambient scope when <paramref name="scope" /> is disposed. Uses a
     /// best-effort, last-in-first-out restore: the ambient slot is only changed when it still refers
     /// to <paramref name="scope" />, so out-of-order disposal does not clobber an unrelated scope.
+    /// Any ancestors that were themselves disposed out of order are skipped so the ambient slot never
+    /// points at a disposed scope.
     /// </summary>
     internal static void Restore(LogBufferScope scope, LogBufferScope? previous)
     {
-        if (ReferenceEquals(CurrentScope.Value, scope))
+        if (!ReferenceEquals(CurrentScope.Value, scope))
         {
-            CurrentScope.Value = previous;
+            return;
         }
+
+        while (previous is not null && previous.IsDisposed)
+        {
+            previous = previous.PreviousScope;
+        }
+
+        CurrentScope.Value = previous;
     }
 }

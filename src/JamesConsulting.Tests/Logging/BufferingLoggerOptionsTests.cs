@@ -33,18 +33,16 @@ public class BufferingLoggerOptionsTests
         var options = new BufferingLoggerOptions();
 
         options.BufferLevel.Should().Be(LogLevel.Trace);
-        options.PassthroughLevel.Should().Be(LogLevel.Information);
         options.FlushLevel.Should().Be(LogLevel.Error);
         options.SuspendBufferingAfterFlush.Should().BeTrue();
     }
 
     /// <summary>
-    /// Any threshold set to <see cref="LogLevel.None" /> is rejected.
+    /// Either threshold set to <see cref="LogLevel.None" /> is rejected.
     /// </summary>
     /// <param name="which">Which threshold to set to None.</param>
     [Theory]
     [InlineData("buffer")]
-    [InlineData("passthrough")]
     [InlineData("flush")]
     public void ValidateRejectsNone(string which)
     {
@@ -53,9 +51,6 @@ public class BufferingLoggerOptionsTests
         {
             case "buffer":
                 options.BufferLevel = LogLevel.None;
-                break;
-            case "passthrough":
-                options.PassthroughLevel = LogLevel.None;
                 break;
             default:
                 options.FlushLevel = LogLevel.None;
@@ -68,34 +63,14 @@ public class BufferingLoggerOptionsTests
     }
 
     /// <summary>
-    /// A passthrough level below the buffer level violates the invariant.
+    /// A flush level below the buffer level violates the invariant.
     /// </summary>
     [Fact]
-    public void ValidateRejectsPassthroughBelowBuffer()
+    public void ValidateRejectsFlushBelowBuffer()
     {
         var options = new BufferingLoggerOptions
         {
-            BufferLevel = LogLevel.Information,
-            PassthroughLevel = LogLevel.Debug,
-            FlushLevel = LogLevel.Error,
-        };
-
-        var act = options.Validate;
-
-        act.Should().Throw<ArgumentOutOfRangeException>()
-            .Which.ParamName.Should().Be(nameof(BufferingLoggerOptions.PassthroughLevel));
-    }
-
-    /// <summary>
-    /// A flush level below the passthrough level violates the invariant.
-    /// </summary>
-    [Fact]
-    public void ValidateRejectsFlushBelowPassthrough()
-    {
-        var options = new BufferingLoggerOptions
-        {
-            BufferLevel = LogLevel.Trace,
-            PassthroughLevel = LogLevel.Warning,
+            BufferLevel = LogLevel.Warning,
             FlushLevel = LogLevel.Information,
         };
 
@@ -114,7 +89,6 @@ public class BufferingLoggerOptionsTests
         var options = new BufferingLoggerOptions
         {
             BufferLevel = LogLevel.Information,
-            PassthroughLevel = LogLevel.Information,
             FlushLevel = LogLevel.Information,
         };
 

@@ -105,8 +105,9 @@ public class BufferingLoggingServiceCollectionExtensionsTests
     }
 
     /// <summary>
-    /// End to end: a resolved <see cref="ILogger{T}" /> buffers Debug logs and dumps them when an
-    /// error is logged within a scope.
+    /// End to end: a resolved <see cref="ILogger{T}" /> buffers Debug logs (which the host's
+    /// Information live threshold suppresses) and dumps them directly to the provider when an error is
+    /// logged within a scope.
     /// </summary>
     [Fact]
     public void ResolvedLoggerDumpsOnErrorWithinScope()
@@ -115,7 +116,7 @@ public class BufferingLoggingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.SetMinimumLevel(LogLevel.Information);
             builder.AddProvider(recorder);
             builder.AddBufferingLogging();
         });
@@ -143,7 +144,7 @@ public class BufferingLoggingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.SetMinimumLevel(LogLevel.Information);
             builder.AddProvider(recorder);
             builder.AddBufferingLogging();
         });
@@ -171,7 +172,7 @@ public class BufferingLoggingServiceCollectionExtensionsTests
         var services = new ServiceCollection();
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.SetMinimumLevel(LogLevel.Information);
             builder.AddProvider(recorder);
             builder.AddBufferingLogging();
             builder.AddBufferingLogging();
@@ -192,12 +193,31 @@ public class BufferingLoggingServiceCollectionExtensionsTests
     }
 
     /// <summary>
-    /// With <see cref="BufferingLoggerOptions.ConfigureUnderlyingFilter" /> enabled (the default), the
-    /// auto-appended buffer-level rule wins over a configuration-bound <c>Default</c> rule, so a
-    /// dumped Debug record still reaches the provider without any manual filter setup.
+    /// Idempotency is decided before options are configured or validated, so a second call with
+    /// invalid options is ignored (the first registration wins) rather than throwing.
     /// </summary>
     [Fact]
-    public void ConfigureUnderlyingFilterLetsDumpBeatConfiguredDefault()
+    public void AddBufferingLoggingSecondInvalidCallIsIgnored()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddBufferingLogging();
+
+        var act = () => services.AddBufferingLogging(o => o.FlushLevel = LogLevel.None);
+
+        act.Should().NotThrow();
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ILoggerFactory>().Should().BeOfType<BufferingLoggerFactory>();
+    }
+
+    /// <summary>
+    /// The error dump is written directly to the registered providers, so it bypasses the
+    /// Microsoft.Extensions.Logging factory-level filters: a configuration-bound <c>Default</c> rule
+    /// at Information suppresses Debug live, yet the buffered Debug context still surfaces on error —
+    /// exactly once (the dump), with no live duplicate, and without any extra filter configuration.
+    /// </summary>
+    [Fact]
+    public void DumpBypassesConfiguredFactoryFilter()
     {
         var recorder = new RecordingProvider();
         var services = new ServiceCollection();
@@ -207,9 +227,6 @@ public class BufferingLoggingServiceCollectionExtensionsTests
             builder.AddBufferingLogging();
         });
 
-        // Simulate a configuration-bound Logging:LogLevel:Default = Information rule. A Configure
-        // callback runs before the extension's PostConfigure, so our buffer-level rule is appended
-        // last and wins the tie-break.
         services.Configure<LoggerFilterOptions>(o =>
             o.Rules.Add(new LoggerFilterRule(null, null, LogLevel.Information, null)));
 
@@ -223,153 +240,47 @@ public class BufferingLoggingServiceCollectionExtensionsTests
         }
 
         recorder.Messages.Should().ContainInOrder("ctx", "boom");
+        recorder.Messages.Count(m => m == "ctx").Should().Be(1);
+        recorder.Messages.Count(m => m == "boom").Should().Be(1);
     }
 
     /// <summary>
-    /// With <see cref="BufferingLoggerOptions.ConfigureUnderlyingFilter" /> disabled and an inner
-    /// filter that excludes the buffer level, the dump is filtered out but the triggering error is
-    /// still written and the logger warns exactly once about the misconfiguration.
+    /// The host's live <c>LogLevel</c> stays authoritative (no override): a flush-level record with no
+    /// active scope follows the configured filter exactly, so an error below a configured <c>Default</c>
+    /// rule is suppressed. Inside a scope, the same error dumps the buffered context directly to the
+    /// provider, bypassing that filter.
     /// </summary>
     [Fact]
-    public void DisablingConfigureUnderlyingFilterFiltersDumpAndWarnsOnce()
+    public void NoScopeErrorHonorsHostFilterButScopedErrorDumps()
     {
         var recorder = new RecordingProvider();
         var services = new ServiceCollection();
-        services.AddLogging(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Information);
-            builder.AddProvider(recorder);
-            builder.AddBufferingLogging(o => o.ConfigureUnderlyingFilter = false);
-        });
-
-        using var provider = services.BuildServiceProvider();
-        var logger = provider.GetRequiredService<ILogger<BufferingLoggingServiceCollectionExtensionsTests>>();
-
-        using (LogBuffer.BeginScope())
-        {
-            logger.LogDebug("ctx1");
-            logger.LogError("boom1");
-        }
-
-        using (LogBuffer.BeginScope())
-        {
-            logger.LogDebug("ctx2");
-            logger.LogError("boom2");
-        }
-
-        recorder.Messages.Should().NotContain("ctx1");
-        recorder.Messages.Should().NotContain("ctx2");
-        recorder.Messages.Should().Contain("boom1");
-        recorder.Messages.Should().Contain("boom2");
-        recorder.Messages.Count(m => m.Contains("are filtered out by the underlying logging configuration")).Should().Be(1);
-    }
-
-    /// <summary>
-    /// The dump-filtered backstop warning only fires when a buffering scope is active. A bare
-    /// flush-level record outside any scope dumps nothing, so it must not raise the warning or burn
-    /// the once-only guard that a later real dump relies on.
-    /// </summary>
-    [Fact]
-    public void DumpFilteredWarningDoesNotFireWithoutActiveScope()
-    {
-        var recorder = new RecordingProvider();
-        var services = new ServiceCollection();
-        services.AddLogging(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Information);
-            builder.AddProvider(recorder);
-            builder.AddBufferingLogging(o => o.ConfigureUnderlyingFilter = false);
-        });
-
-        using var provider = services.BuildServiceProvider();
-        var logger = provider.GetRequiredService<ILogger<BufferingLoggingServiceCollectionExtensionsTests>>();
-
-        // No LogBuffer scope: nothing is buffered, so the error dumps nothing.
-        logger.LogError("boom-no-scope");
-
-        recorder.Messages.Should().Contain("boom-no-scope");
-        recorder.Messages.Should().NotContain(m => m.Contains("are filtered out by the underlying logging configuration"));
-
-        // The guard was not consumed, so a subsequent real scoped dump still warns.
-        using (LogBuffer.BeginScope())
-        {
-            logger.LogDebug("ctx");
-            logger.LogError("boom");
-        }
-
-        recorder.Messages.Count(m => m.Contains("are filtered out by the underlying logging configuration")).Should().Be(1);
-    }
-
-    /// <summary>
-    /// The auto-appended no-category rule does not override a more specific category rule, so a
-    /// category that is filtered above the buffer level still loses its dump — and the logger warns
-    /// once about it. This locks in the documented limitation.
-    /// </summary>
-    [Fact]
-    public void ConfigureUnderlyingFilterDoesNotBeatCategoryRuleAndWarnsOnce()
-    {
-        var recorder = new RecordingProvider();
-        var services = new ServiceCollection();
-        var category = typeof(BufferingLoggingServiceCollectionExtensionsTests).FullName!;
         services.AddLogging(builder =>
         {
             builder.AddProvider(recorder);
             builder.AddBufferingLogging();
         });
 
-        // A category-specific rule at Information is more specific than our null/null buffer rule.
+        // A configured Default rule at Critical suppresses Error live.
         services.Configure<LoggerFilterOptions>(o =>
-            o.Rules.Add(new LoggerFilterRule(null, category, LogLevel.Information, null)));
+            o.Rules.Add(new LoggerFilterRule(null, null, LogLevel.Critical, null)));
 
         using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILogger<BufferingLoggingServiceCollectionExtensionsTests>>();
 
-        using (LogBuffer.BeginScope())
-        {
-            logger.LogDebug("ctx1");
-            logger.LogError("boom1");
-        }
+        // No scope: nothing to dump, so the host filter is authoritative and the error is suppressed.
+        logger.LogError("boom-no-scope");
+        recorder.Messages.Should().NotContain("boom-no-scope");
 
-        using (LogBuffer.BeginScope())
-        {
-            logger.LogDebug("ctx2");
-            logger.LogError("boom2");
-        }
-
-        recorder.Messages.Should().NotContain("ctx1");
-        recorder.Messages.Should().NotContain("ctx2");
-        recorder.Messages.Should().Contain("boom1");
-        recorder.Messages.Count(m => m.Contains("are filtered out by the underlying logging configuration")).Should().Be(1);
-    }
-
-    /// <summary>
-    /// When the underlying filter is higher than Warning, the backstop "dump filtered" warning is
-    /// still visible because it is emitted at the flush level (which is written live).
-    /// </summary>
-    [Fact]
-    public void DumpFilteredWarningIsVisibleAboveWarningThreshold()
-    {
-        var recorder = new RecordingProvider();
-        var services = new ServiceCollection();
-        services.AddLogging(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Error);
-            builder.AddProvider(recorder);
-            builder.AddBufferingLogging(o => o.ConfigureUnderlyingFilter = false);
-        });
-
-        using var provider = services.BuildServiceProvider();
-        var logger = provider.GetRequiredService<ILogger<BufferingLoggingServiceCollectionExtensionsTests>>();
-
+        // Active scope: the buffered context and the triggering error are replayed directly to the
+        // provider, bypassing the configured filter.
         using (LogBuffer.BeginScope())
         {
             logger.LogDebug("ctx");
             logger.LogError("boom");
         }
 
-        recorder.Messages.Should().NotContain("ctx");
-        recorder.Messages.Should().Contain("boom");
-        recorder.Messages.Count(m => m.Contains("are filtered out by the underlying logging configuration")).Should().Be(1);
+        recorder.Messages.Should().ContainInOrder("ctx", "boom");
     }
 
     private sealed class RecordingProvider : ILoggerProvider

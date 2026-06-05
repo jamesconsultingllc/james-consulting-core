@@ -11,9 +11,10 @@ public static class BufferingLoggingBuilderExtensions
 {
     /// <summary>
     /// Enables buffering ("dump-on-error") logging by decorating the registered
-    /// <see cref="ILoggerFactory" />. By default the underlying logging filter is lowered for you
-    /// (see <see cref="BufferingLoggerOptions.ConfigureUnderlyingFilter" />) so that flushed records
-    /// reach your sinks.
+    /// <see cref="ILoggerFactory" />. Your host's live logging configuration stays authoritative;
+    /// records below the live threshold are buffered and, on an error inside a
+    /// <see cref="LogBufferScope" />, replayed directly to the registered providers so no extra
+    /// filter configuration is needed for the dump to reach your sinks.
     /// </summary>
     /// <param name="builder">The logging builder.</param>
     /// <param name="configure">An optional callback to configure <see cref="BufferingLoggerOptions" />.</param>
@@ -24,12 +25,12 @@ public static class BufferingLoggingBuilderExtensions
     /// services.AddLogging(logging =>
     /// {
     ///     logging.AddConsole();
-    ///     // AddBufferingLogging lowers the underlying filter to BufferLevel by default, so a
-    ///     // separate SetMinimumLevel/filter rule is not required for the dump to reach sinks.
+    ///     // The host's Logging:LogLevel still controls live logging. BufferLevel sets how deep the
+    ///     // buffer captures; FlushLevel triggers the dump. On error the buffered context is replayed
+    ///     // directly to the providers, bypassing the MEL factory filters.
     ///     logging.AddBufferingLogging(o =>
     ///     {
     ///         o.BufferLevel = LogLevel.Trace;
-    ///         o.PassthroughLevel = LogLevel.Information;
     ///         o.FlushLevel = LogLevel.Error;
     ///     });
     /// });

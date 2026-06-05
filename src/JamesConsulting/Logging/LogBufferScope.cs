@@ -9,7 +9,8 @@ namespace JamesConsulting.Logging;
 /// (see <see cref="LogBuffer.BeginScope(int)" />), the buffering logger captures buffer-range
 /// records into it instead of writing them. When the scope is flushed — either automatically by a
 /// record at or above the configured flush level, or manually via <see cref="Flush" /> — every
-/// captured record is emitted to its originating logger. Records are replayed in the order they were
+/// captured record is replayed directly to the registered logging providers, bypassing the
+/// Microsoft.Extensions.Logging factory-level filters. Records are replayed in the order they were
 /// logged within a single logical flow; ordering is best-effort under any concurrent logging on the
 /// scope (for example a second thread flushing or writing live while a replay is in progress).
 /// </summary>
@@ -60,6 +61,12 @@ public sealed class LogBufferScope : IDisposable
     public int Capacity => buffer.Length;
 
     /// <summary>
+    /// Gets the scope that was ambient when this scope was started, restored when this scope is
+    /// disposed. <c>null</c> for a root scope.
+    /// </summary>
+    internal LogBufferScope? PreviousScope => previous;
+
+    /// <summary>
     /// Gets the number of records currently held in the buffer.
     /// </summary>
     public int Count
@@ -74,12 +81,14 @@ public sealed class LogBufferScope : IDisposable
     }
 
     /// <summary>
-    /// Gets a value indicating whether this scope has been flushed, meaning subsequent buffer-range
-    /// records are written live when <see cref="BufferingLoggerOptions.SuspendBufferingAfterFlush" />
-    /// is enabled. Set by an error-triggered flush (even when the buffer was empty) and by a manual
-    /// <see cref="Flush" /> that actually dumped records; an empty manual <see cref="Flush" /> leaves
-    /// it unset. Ancestor scopes dumped for context by a nested error are <em>not</em> marked
-    /// flushed.
+    /// Gets a value indicating whether this scope has been flushed. When
+    /// <see cref="BufferingLoggerOptions.SuspendBufferingAfterFlush" /> is enabled, buffering is
+    /// suspended once this is set, so subsequent buffer-range records are no longer captured; they
+    /// are emitted only if the host's live configuration (which stays authoritative) would write
+    /// them, and are otherwise dropped. Set by an error-triggered flush (even when the buffer was
+    /// empty) and by a manual <see cref="Flush" /> that actually dumped records; an empty manual
+    /// <see cref="Flush" /> leaves it unset. Ancestor scopes dumped for context by a nested error are
+    /// <em>not</em> marked flushed.
     /// </summary>
     public bool IsFlushed
     {
@@ -107,9 +116,10 @@ public sealed class LogBufferScope : IDisposable
     }
 
     /// <summary>
-    /// Emits every buffered record, in the order it was logged, to its originating logger, then
-    /// clears the buffer. When records are dumped the scope is marked flushed (suspending buffering
-    /// for the remainder of the scope when
+    /// Replays every buffered record, in the order it was logged, directly to the registered logging
+    /// providers (bypassing the Microsoft.Extensions.Logging factory-level filters), then clears the
+    /// buffer. When records are dumped the scope is marked flushed (suspending buffering for the
+    /// remainder of the scope when
     /// <see cref="BufferingLoggerOptions.SuspendBufferingAfterFlush" /> is enabled); a manual flush
     /// that finds no buffered records is a no-op and does <em>not</em> suspend buffering, so a
     /// defensive <see cref="Flush" /> cannot silently disable buffering for the rest of the scope.
@@ -199,9 +209,11 @@ public sealed class LogBufferScope : IDisposable
 
             if (isFlushed && suspendAfterFlush)
             {
-                // The scope was flushed (possibly concurrently) and buffering is suspended: the
-                // caller must emit this record live instead. Decided under the lock so it cannot
-                // race with a concurrent Flush.
+                // The scope was flushed (possibly concurrently) and buffering is suspended, so this
+                // record is not captured. Emission is left to the host's authoritative live
+                // configuration, which already declined this below-threshold record, so it is
+                // effectively dropped. Decided under the lock so it cannot race with a concurrent
+                // Flush.
                 return LogBufferEnqueueResult.AlreadyFlushed;
             }
 
