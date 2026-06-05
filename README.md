@@ -126,7 +126,7 @@ public async Task ProcessAsync(ILogger<OrderService> logger, int orderId)
 }
 ```
 
-> **Dumped records always reach your sinks — no filter configuration required.** The error dump is
+> **Dumped records reach your sinks without extra filter configuration.** The error dump is
 > replayed **directly to the registered logging providers**, bypassing the
 > Microsoft.Extensions.Logging factory-level filters (the `Logging:LogLevel` category/provider rules).
 > That is deliberate: the whole point of a dump-on-error buffer is to surface the low-level context
@@ -134,6 +134,12 @@ public async Task ProcessAsync(ILogger<OrderService> logger, int orderId)
 > you need — buffered `Debug`/`Trace` still appears on error. One consequence: an error replays the
 > buffered context to **every** registered provider, even one whose own configured level would normally
 > exclude those records.
+>
+> **The edge case:** if no logging providers are registered (or a custom inner factory whose providers
+> weren't surfaced to the decorator), the replay target reaches nothing, so the buffered context can't
+> be dumped — only the triggering `Error`/`Critical` record falls back to the inner logger and follows
+> your live configuration. Any realistic setup with at least one provider (e.g. `AddConsole()`) dumps to
+> every registered sink.
 
 > **Replay fidelity.** Object-valued structured properties (e.g. `logger.LogDebug("processing {Order}",
 > order)`) are frozen to their `ToString()` text at log time so a later mutation can't change what the
