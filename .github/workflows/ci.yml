@@ -5,7 +5,7 @@ name: CI
 #
 #   - Push to any tracked branch / PR / workflow_dispatch -> build-test only
 #   - Push to release/**                                  -> build-test + publish-rc
-#                                                            (version: <major>.<minor>.0-rc.<run_number>)
+#                                                            (version: <major>.<minor>.<patch>-rc.<height>)
 #   - Push tag v*                                         -> build-test + publish-stable
 #                                                            (version: <major>.<minor>.<patch>; tag must equal version.json
 #                                                             AND commit must be reachable from the stable branch)
@@ -62,8 +62,12 @@ jobs:
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: |
-            9.0.x
             10.0.x
+            11.0.x
+
+      - name: Test package verification
+        shell: pwsh
+        run: ./scripts/tests/package-version.tests.ps1
 
       - name: Setup Java (Sonar scanner requires JRE)
         if: ${{ vars.SONAR_PROJECT_KEY != '' && env.SONAR_TOKEN_SET == 'true' }}
@@ -93,7 +97,7 @@ jobs:
             /d:sonar.coverage.exclusions="**/*Tests/**,**/*.Tests/**"
 
       - name: Build
-        run: dotnet build "$SOLUTION" --configuration Release --no-restore
+        run: dotnet build "$SOLUTION" --configuration Release --no-restore -p:PublicRelease=false
 
       - name: Test (with coverage)
         run: |
@@ -111,14 +115,15 @@ jobs:
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: Pack (preview, for artifact only)
-        # CI suffix prevents accidental consumption of an unpublished build.
+        # NBGV's non-public version includes the commit ID, even on stable tags.
+        # VersionSuffix is not used: NBGV computes PackageVersion itself.
         # publish-rc / publish-stable below produce the real signed packages.
         run: |
           dotnet pack "$PACKAGE_PROJECT" \
             --configuration Release \
             --no-build \
             --output ./artifacts \
-            -p:VersionSuffix="ci.${{ github.run_number }}"
+            -p:PublicRelease=false
 
       - name: Upload nupkg artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -161,8 +166,8 @@ jobs:
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: |
-            9.0.x
             10.0.x
+            11.0.x
 
       - name: Restore tools
         run: dotnet tool restore
@@ -177,8 +182,9 @@ jobs:
             echo "::error::nbgv returned empty NuGetPackageVersion"
             exit 1
           fi
-          if [[ ! "$VERSION" =~ -rc(\.[0-9]+)?$ ]]; then
-            echo "::error::Expected RC version on release/* branch but got '$VERSION'. Is version.json set to '<MAJOR>.<MINOR>.<PATCH>-rc'?"
+          if [[ ! "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-rc\.[0-9]+$ ]] ||
+             [[ "${BASH_REMATCH[1]}" != "${GITHUB_REF#refs/heads/release/}" ]]; then
+            echo "::error::Expected '${GITHUB_REF#refs/heads/release/}-rc.<height>' but got '$VERSION'. Set version.json to the release version with '-rc.{height}' and commit it before publishing."
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -199,6 +205,12 @@ jobs:
             --configuration Release \
             --no-build \
             --output ./artifacts
+
+      - name: Verify package identity
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/verify-package.ps1 -PackageDirectory ./artifacts -ExpectedVersion $env:EXPECTED_VERSION
 
       # ----- Azure Trusted Signing -----
       # Federated credential required on the Entra app behind AZURE_CLIENT_ID:
@@ -236,24 +248,14 @@ jobs:
 
       - name: Push to nuget.org
         shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          # `dotnet nuget push` does not expand globs and bash does not
-          # expand them inside double quotes — enumerate explicitly with
-          # `compgen -G` (which handles "no matches" without erroring under
-          # `set -e`) and push each file individually. `--skip-duplicate`
-          # keeps the job idempotent across retries.
-          mapfile -t NUPKGS < <(compgen -G "./artifacts/*.nupkg" || true)
-          if [ "${#NUPKGS[@]}" -eq 0 ]; then
-            echo "::error::No .nupkg files found in ./artifacts to push."
-            exit 1
-          fi
-          for pkg in "${NUPKGS[@]}"; do
-            dotnet nuget push "$pkg" \
-              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate
-          done
+          dotnet nuget push "./artifacts/JamesConsulting.$PACKAGE_VERSION.nupkg" \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
 
       - name: Upload signed package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -289,8 +291,8 @@ jobs:
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: |
-            9.0.x
             10.0.x
+            11.0.x
 
       - name: Restore tools
         run: dotnet tool restore
@@ -346,6 +348,12 @@ jobs:
             --no-build \
             --output ./artifacts
 
+      - name: Verify package identity
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/verify-package.ps1 -PackageDirectory ./artifacts -ExpectedVersion $env:EXPECTED_VERSION
+
       - name: Azure login (OIDC)
         uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
         with:
@@ -375,24 +383,14 @@ jobs:
 
       - name: Push to nuget.org
         shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          # `dotnet nuget push` does not expand globs and bash does not
-          # expand them inside double quotes — enumerate explicitly with
-          # `compgen -G` (which handles "no matches" without erroring under
-          # `set -e`) and push each file individually. `--skip-duplicate`
-          # keeps the job idempotent across retries.
-          mapfile -t NUPKGS < <(compgen -G "./artifacts/*.nupkg" || true)
-          if [ "${#NUPKGS[@]}" -eq 0 ]; then
-            echo "::error::No .nupkg files found in ./artifacts to push."
-            exit 1
-          fi
-          for pkg in "${NUPKGS[@]}"; do
-            dotnet nuget push "$pkg" \
-              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate
-          done
+          dotnet nuget push "./artifacts/JamesConsulting.$PACKAGE_VERSION.nupkg" \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
 
       - name: Upload signed package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

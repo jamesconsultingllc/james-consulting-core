@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using FluentAssertions;
 using Xunit;
@@ -62,6 +63,49 @@ public class ObjectExtensionsTests
         foreach (var value5 in maskedTest.Value5) value5.Value1.Should().Be(default);
     }
 
+    [Fact]
+    public void MaskSupportsArrayIndexes()
+    {
+        var test = new Test
+        {
+            Value5 =
+            [
+                new Test2 { Value1 = "first", Value2 = 1 },
+                new Test2 { Value1 = "second", Value2 = 2 }
+            ]
+        };
+
+        var masked = test.Mask("Value5[1].Value2");
+
+        masked.Value5![0].Value2.Should().Be(1);
+        masked.Value5[1].Value2.Should().Be(0);
+    }
+
+    [Fact]
+    public void MaskSupportsQuotedPropertyNames()
+    {
+        var data = new Dictionary<string, string>
+        {
+            ["Value.With.Dot"] = "private",
+            ["Keep"] = "visible"
+        };
+
+        var masked = data.Mask("['Value.With.Dot']");
+
+        masked["Value.With.Dot"].Should().BeNull();
+        masked["Keep"].Should().Be("visible");
+    }
+
+    [Fact]
+    public void MaskRejectsRecursiveJsonPathSelectors()
+    {
+        var test = new Test { Value1 = "private" };
+
+        var exception = Assert.Throws<ArgumentException>(() => test.Mask("$..Value1"));
+
+        exception.ParamName.Should().Be("propertiesToMask");
+    }
+
     /// <summary>
     /// Test when null is sent in place of the ignore list, an exception is thrown.
     /// </summary>
@@ -101,6 +145,13 @@ public class ObjectExtensionsTests
         obj.ToJson().Should().NotBeNull();
     }
 
+    [Fact]
+    public void ToJsonSerializesObjectWithCompactJson()
+    {
+        var json = new { Name = "Rudy", Value = 3 }.ToJson();
+        json.Should().Be("{\"Name\":\"Rudy\",\"Value\":3}");
+    }
+
     /// <summary>
     /// Tests serialize to json stream.
     /// </summary>
@@ -111,6 +162,8 @@ public class ObjectExtensionsTests
         var stream = test.SerializeToJsonStream(new MemoryStream());
         stream.Should().NotBeNull();
         stream.Length.Should().BeGreaterThan(0);
+        stream.Position.Should().Be(0);
+        stream.CanRead.Should().BeTrue();
     }
 
     /// <summary>

@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using FluentAssertions;
 using JamesConsulting.IO;
-using Utf8Json;
+using System.Text.Json;
 using Xunit;
 
 namespace JamesConsulting.Tests.IO;
@@ -34,6 +34,97 @@ public class StreamExtensionsTests
         _ = ms.Deserialize<MyClass>();
         // CanRead would be false on a disposed MemoryStream.
         ms.CanRead.Should().BeTrue("the caller-provided stream must remain open after Deserialize returns");
+    }
+
+    [Fact]
+    public void DeserializeMatchesPropertyNamesWithoutCaseSensitivity()
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(
+            "{\"property1\":\"Test\",\"property2\":3}"));
+
+        var result = stream.Deserialize<MyClass>();
+
+        result.Should().Be(new MyClass("Test", 3));
+        stream.CanRead.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DeserializeSupportsUtf16BigEndianBom()
+    {
+        using var stream = new MemoryStream();
+        stream.Write(Encoding.BigEndianUnicode.GetPreamble());
+        stream.Write(Encoding.BigEndianUnicode.GetBytes("{\"Property1\":\"Test\",\"Property2\":3}"));
+        stream.Position = 0;
+
+        var result = stream.Deserialize<MyClass>();
+
+        result.Should().Be(new MyClass("Test", 3));
+    }
+
+    [Fact]
+    public void DeserializeSupportsUtf32Bom()
+    {
+        var encoding = new UTF32Encoding(bigEndian: false, byteOrderMark: true);
+        using var stream = new MemoryStream();
+        stream.Write(encoding.GetPreamble());
+        stream.Write(encoding.GetBytes("{\"Property1\":\"Test\",\"Property2\":3}"));
+        stream.Position = 0;
+
+        var result = stream.Deserialize<MyClass>();
+
+        result.Should().Be(new MyClass("Test", 3));
+    }
+
+    [Fact]
+    public void DeserializeSupportsUtf32BigEndianBom()
+    {
+        var encoding = new UTF32Encoding(bigEndian: true, byteOrderMark: true);
+        using var stream = new MemoryStream();
+        stream.Write(encoding.GetPreamble());
+        stream.Write(encoding.GetBytes("{\"Property1\":\"Test\",\"Property2\":3}"));
+        stream.Position = 0;
+
+        var result = stream.Deserialize<MyClass>();
+
+        result.Should().Be(new MyClass("Test", 3));
+    }
+
+    [Fact]
+    public void DeserializeSupportsNonSeekableStream()
+    {
+        using var stream = new NonSeekableReadStream(
+            Encoding.UTF8.GetBytes("{\"Property1\":\"Test\",\"Property2\":3}"));
+
+        var result = stream.Deserialize<MyClass>();
+
+        result.Should().Be(new MyClass("Test", 3));
+        stream.CanRead.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DeserializeSupportsUtf8Bom()
+    {
+        using var stream = new MemoryStream();
+        stream.Write(Encoding.UTF8.GetPreamble());
+        stream.Write(Encoding.UTF8.GetBytes("{\"Property1\":\"Test\",\"Property2\":3}"));
+        stream.Position = 0;
+
+        var result = stream.Deserialize<MyClass>();
+
+        result.Should().Be(new MyClass("Test", 3));
+    }
+
+    [Fact]
+    public void DeserializeSupportsUtf16Bom()
+    {
+        using var stream = new MemoryStream();
+        stream.Write(Encoding.Unicode.GetPreamble());
+        stream.Write(Encoding.Unicode.GetBytes("{\"Property1\":\"Test\",\"Property2\":3}"));
+        stream.Position = 0;
+
+        var result = stream.Deserialize<MyClass>();
+
+        result.Should().Be(new MyClass("Test", 3));
     }
 
     [Fact]
@@ -121,15 +212,7 @@ public class StreamExtensionsTests
 
         public override int GetHashCode()
         {
-#if NETSTANDARD2_0
-                var hashcode = 35203352;
-                var offset = -1521134295;
-                hashcode *= offset + Property1.GetHashCode();
-                hashcode *= offset + Property2.GetHashCode();
-                return hashcode;
-#else
             return HashCode.Combine(Property1, Property2);
-#endif
         }
     }
 

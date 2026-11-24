@@ -1,8 +1,8 @@
 ﻿using System;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using JamesConsulting.Internal;
-using Newtonsoft.Json;
 
 namespace JamesConsulting.IO;
 
@@ -55,18 +55,6 @@ public static class StreamExtensions
         try
         {
             stream.Position = 0;
-#if NETSTANDARD2_0
-            var buffer = new byte[2];
-            var total = 0;
-            while (total < 2)
-            {
-                var read = stream.Read(buffer, total, 2 - total);
-                if (read == 0) return false;
-                total += read;
-            }
-
-            return buffer[0] == (byte)'M' && buffer[1] == (byte)'Z';
-#else
             Span<byte> buffer = stackalloc byte[2];
             var total = 0;
             while (total < 2)
@@ -77,7 +65,6 @@ public static class StreamExtensions
             }
 
             return buffer[0] == (byte)'M' && buffer[1] == (byte)'Z';
-#endif
         }
         finally
         {
@@ -86,13 +73,14 @@ public static class StreamExtensions
     }
 
     /// <summary>
-    /// Deserializes the entire textual content of a stream to a CLR object using <c>Newtonsoft.Json</c>.
+    /// Deserializes JSON from a stream to a CLR object.
     /// </summary>
     /// <typeparam name="T">Target CLR type for the JSON payload.</typeparam>
     /// <param name="stream">The source stream positioned at the beginning of the JSON document.</param>
     /// <returns>An instance of <typeparamref name="T" /> or <c>null</c> if the JSON represents <c>null</c>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="stream" /> is <c>null</c>.</exception>
-    /// <exception cref="JsonException">Invalid JSON content.</exception>
+    /// <exception cref="JsonException">The JSON is invalid or cannot be converted to <typeparamref name="T" />.</exception>
+    /// <remarks>The stream remains open. UTF-8 is parsed directly; UTF-16/UTF-32 BOM input is transcoded before parsing.</remarks>
     /// <example>
     /// Deserialize JSON from stream.
     /// <code>
@@ -116,15 +104,109 @@ public static class StreamExtensions
     public static T? Deserialize<T>(this Stream stream)
     {
         Guard.NotNull(stream);
-        // leaveOpen=true keeps the caller-provided stream alive after the StreamReader and
-        // JsonTextReader are disposed. The default StreamReader behavior would close the
-        // underlying stream, surprising callers that expected to reuse or dispose it
-        // themselves. We pass Encoding.UTF8 (which detects and consumes a BOM if present)
-        // and use the four-argument constructor available on every supported TFM.
-        using var sr = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
-            bufferSize: 1024, leaveOpen: true);
-        using JsonReader reader = new JsonTextReader(sr);
-        var serializer = new JsonSerializer();
-        return serializer.Deserialize<T>(reader);
+        var (prefix, requiresTranscoding) = ReadJsonPrefix(stream);
+        using var prefixedStream = new PrefixStream(prefix, stream);
+        if (requiresTranscoding)
+        {
+            using var reader = new StreamReader(
+                prefixedStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
+                bufferSize: 1024, leaveOpen: true);
+            return JsonSerializer.Deserialize<T>(reader.ReadToEnd(), ObjectExtensions.SerializerOptions);
+        }
+
+        return JsonSerializer.Deserialize<T>(prefixedStream, ObjectExtensions.SerializerOptions);
+    }
+
+    private static (byte[] Prefix, bool RequiresTranscoding) ReadJsonPrefix(Stream stream)
+    {
+        var prefix = new byte[4];
+        var length = 0;
+        var first = ReadByte();
+
+        if (first == 0xFE)
+        {
+            var second = ReadByte();
+            return (prefix[..length], second == 0xFF);
+        }
+
+        if (first == 0xFF && ReadByte() == 0xFE)
+        {
+            var third = ReadByte();
+            if (third != 0)
+                return (prefix[..length], true);
+
+            var fourth = ReadByte();
+            return (prefix[..length], fourth is 0 or -1);
+        }
+
+        if (first == 0x00 && ReadByte() == 0x00 && ReadByte() == 0xFE)
+        {
+            var fourth = ReadByte();
+            return (prefix[..length], fourth == 0xFF);
+        }
+
+        if (first == 0xEF && ReadByte() == 0xBB)
+            ReadByte();
+
+        return (prefix[..length], false);
+
+        int ReadByte()
+        {
+            var value = stream.ReadByte();
+            if (value >= 0)
+                prefix[length++] = (byte)value;
+            return value;
+        }
+    }
+
+    private sealed class PrefixStream(byte[] prefix, Stream inner) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_position < prefix.Length)
+            {
+                var copied = Math.Min(count, prefix.Length - _position);
+                Buffer.BlockCopy(prefix, _position, buffer, offset, copied);
+                _position += copied;
+                return copied;
+            }
+
+            return inner.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (_position < prefix.Length)
+            {
+                var copied = Math.Min(buffer.Length, prefix.Length - _position);
+                prefix.AsSpan(_position, copied).CopyTo(buffer);
+                _position += copied;
+                return copied;
+            }
+
+            return inner.Read(buffer);
+        }
+
+        public override int ReadByte()
+        {
+            return _position < prefix.Length ? prefix[_position++] : inner.ReadByte();
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

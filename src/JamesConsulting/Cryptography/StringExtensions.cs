@@ -85,14 +85,7 @@ public static class StringExtensions
     public static byte[] GenerateSalt(int size = 32)
     {
         if (size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
-#if NET6_0_OR_GREATER
-            return RandomNumberGenerator.GetBytes(size);
-#else
-        var randomNumber = new byte[size];
-        using var randomNumberGenerator = RandomNumberGenerator.Create();
-        randomNumberGenerator.GetBytes(randomNumber);
-        return randomNumber;
-#endif
+        return RandomNumberGenerator.GetBytes(size);
     }
 
     /// <summary>
@@ -100,7 +93,7 @@ public static class StringExtensions
     /// </summary>
     /// <param name="target">The input string to hash.</param>
     /// <param name="numberOfRounds">The PBKDF2 iteration count. Defaults to 100,000.</param>
-    /// <param name="algorithm">The hash algorithm; defaults to <see cref="HashAlgorithmName.SHA256" /> on .NET Standard 2.1 and modern .NET (<c>net9.0</c>/<c>net10.0</c>). On the <c>netstandard2.0</c> target only the default SHA1 is supported; supplying any other <see cref="HashAlgorithmName" /> throws <see cref="PlatformNotSupportedException" />.</param>
+    /// <param name="algorithm">The hash algorithm; defaults to <see cref="HashAlgorithmName.SHA256" />.</param>
     /// <returns>A tuple containing the Base64 encoded hash and the generated salt.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="target" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="target" /> is empty.</exception>
@@ -134,7 +127,7 @@ public static class StringExtensions
     /// <param name="target">The input string.</param>
     /// <param name="salt">The cryptographic salt (must not be null or empty).</param>
     /// <param name="numberOfRounds">The PBKDF2 iteration count. Defaults to 100,000.</param>
-    /// <param name="algorithm">The hash algorithm; defaults to <see cref="HashAlgorithmName.SHA256" /> on .NET Standard 2.1 and modern .NET (<c>net9.0</c>/<c>net10.0</c>). On the <c>netstandard2.0</c> target only the default SHA1 is supported; supplying any other <see cref="HashAlgorithmName" /> throws <see cref="PlatformNotSupportedException" />.</param>
+    /// <param name="algorithm">The hash algorithm; defaults to <see cref="HashAlgorithmName.SHA256" />.</param>
     /// <returns>The Base64 encoded PBKDF2 derived key.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="target" /> or <paramref name="salt" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="target" /> or <paramref name="salt" /> is empty.</exception>
@@ -163,36 +156,10 @@ public static class StringExtensions
         if (numberOfRounds < 100_000)
             throw new ArgumentOutOfRangeException(nameof(numberOfRounds), "Iteration count must be >= 100,000.");
 
-#if NET8_0_OR_GREATER
-        // Static PBKDF2 helper for newer frameworks.
         var effectiveAlgorithm = algorithm ?? HashAlgorithmName.SHA256;
         var bytes = Encoding.UTF8.GetBytes(target);
         Span<byte> derived = stackalloc byte[32];
         Rfc2898DeriveBytes.Pbkdf2(bytes, salt, derived, numberOfRounds, effectiveAlgorithm);
         return Convert.ToBase64String(derived);
-#elif NETSTANDARD2_0
-        if (algorithm.HasValue)
-        {
-            // Reject default(HashAlgorithmName) explicitly: its Name is null, which is
-            // not a "custom algorithm" — it's an invalid value supplied by the caller.
-            if (string.IsNullOrEmpty(algorithm.Value.Name))
-                throw new ArgumentException(
-                    "HashAlgorithmName.Name must not be null or empty. Pass null to accept the default, or specify a valid algorithm.",
-                    nameof(algorithm));
-            if (algorithm.Value != HashAlgorithmName.SHA1)
-                throw new PlatformNotSupportedException(
-                    "Custom PBKDF2 hash algorithms require .NET Standard 2.1 or modern .NET (net9.0/net10.0). " +
-                    "On the netstandard2.0 target only the legacy SHA1 default is supported.");
-        }
-        using var rfc2898DeriveBytes = new Rfc2898DeriveBytes(Encoding.UTF8.GetBytes(target), salt, numberOfRounds);
-        var hash = rfc2898DeriveBytes.GetBytes(32);
-        return Convert.ToBase64String(hash);
-#else
-        var effectiveAlgorithm = algorithm ?? HashAlgorithmName.SHA256;
-        using var rfc2898DeriveBytes = new Rfc2898DeriveBytes(
-            Encoding.UTF8.GetBytes(target), salt, numberOfRounds, effectiveAlgorithm);
-        var hash = rfc2898DeriveBytes.GetBytes(32);
-        return Convert.ToBase64String(hash);
-#endif
     }
 }

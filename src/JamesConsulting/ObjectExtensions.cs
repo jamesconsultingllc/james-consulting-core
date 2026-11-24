@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
-using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 using JamesConsulting.Internal;
-using Newtonsoft.Json.Linq;
-using Utf8Json;
 
 namespace JamesConsulting;
 
@@ -12,7 +14,11 @@ namespace JamesConsulting;
 /// </summary>
 public static class ObjectExtensions
 {
-    private static readonly JTokenType[] NumericTokenTypes = { JTokenType.Float, JTokenType.Integer };
+    internal static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+    };
 
     /// <summary>
     /// Gets the runtime type of an object or returns the generic type parameter when the instance is <c>null</c>.
@@ -39,7 +45,10 @@ public static class ObjectExtensions
     /// </summary>
     /// <typeparam name="T">The type of the object being masked.</typeparam>
     /// <param name="data">The source object.</param>
-    /// <param name="propertiesToMask">JsonPath-like property names to mask at the root (e.g. <c>Customer.Address</c>).</param>
+    /// <param name="propertiesToMask">
+    /// Dot-delimited property paths with optional quoted property names, array indices, or array wildcards
+    /// (e.g. <c>Customer.Address</c> or <c>Orders[*].CardNumber</c>). JSONPath filters and recursive descent are not supported.
+    /// </param>
     /// <returns>A copy of <paramref name="data" /> with targeted properties masked.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="data" /> or <paramref name="propertiesToMask" /> is <c>null</c>.
@@ -57,31 +66,213 @@ public static class ObjectExtensions
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
         Guard.NotNullOrEmpty(propertiesToMask);
-        var jo = JObject.FromObject(data!);
-        foreach (var propertyToMask in propertiesToMask)
+        var root = JsonSerializer.SerializeToNode(data, data.GetType());
+        if (root is null)
+            throw new InvalidOperationException("The object serialized to JSON null and cannot be masked.");
+
+        foreach (var path in propertiesToMask)
         {
-            var properties = jo.SelectTokens($"$.{propertyToMask}");
-            foreach (var property in properties) SetValue(jo, property);
+            foreach (var selection in SelectTokens(root, data.GetType(), path, nameof(propertiesToMask)))
+                SetValue(selection.Node, selection.Type);
         }
 
-        return jo.ToObject<T>()!;
+        return root.Deserialize<T>(SerializerOptions)!;
     }
 
-    private static void SetValue(JToken jo, JToken property)
+    private static List<NodeSelection> SelectTokens(
+        JsonNode root, Type rootType, string path, string parameterName)
     {
-        if (jo.SelectToken(property.Path) is not JValue key) return;
-        if (key.Type == JTokenType.String) key.Value = default(string);
-        else if (NumericTokenTypes.Contains(key.Type)) key.Value = default(int);
-        else
-            key.Value = key.Type switch
+        var nodes = new List<NodeSelection> { new(root, rootType) };
+        var index = 0;
+        if (path.StartsWith('$'))
+            index++;
+
+        while (index < path.Length)
+        {
+            if (path[index] == '.')
             {
-                JTokenType.Date => default(DateTime),
-                JTokenType.TimeSpan => default(TimeSpan),
-                JTokenType.Array => null,
-                JTokenType.Object => null,
-                _ => key.Value
-            };
+                if (index + 1 < path.Length && path[index + 1] == '.')
+                    throw new ArgumentException(
+                        "Recursive descent is not supported in property paths.", parameterName);
+                index++;
+                continue;
+            }
+
+            var nextNodes = new List<NodeSelection>();
+            if (path[index] == '[')
+            {
+                var closeIndex = path.IndexOf(']', index + 1);
+                if (closeIndex < 0)
+                    throw new ArgumentException("The property path contains an unmatched '['.", parameterName);
+
+                var selector = path[(index + 1)..closeIndex];
+                index = closeIndex + 1;
+                AddBracketMatches(nodes, nextNodes, selector, parameterName);
+            }
+            else
+            {
+                var startIndex = index;
+                while (index < path.Length && path[index] is not '.' and not '[')
+                    index++;
+                var propertyName = path[startIndex..index];
+                if (propertyName.Length == 0)
+                    throw new ArgumentException("The property path contains an empty segment.", parameterName);
+
+                foreach (var selection in nodes)
+                {
+                    if (propertyName == "*" && selection.Node is JsonObject objectNode)
+                    {
+                        foreach (var property in objectNode)
+                        {
+                            if (property.Value is not null)
+                                nextNodes.Add(new NodeSelection(
+                                    property.Value, GetPropertyType(selection.Type, property.Key)));
+                        }
+                    }
+                    else if (selection.Node is JsonObject parent &&
+                             parent.TryGetPropertyValue(propertyName, out var propertyValue) &&
+                             propertyValue is not null)
+                    {
+                        nextNodes.Add(new NodeSelection(
+                            propertyValue, GetPropertyType(selection.Type, propertyName)));
+                    }
+                }
+            }
+
+            nodes = nextNodes;
+            if (nodes.Count == 0)
+                break;
+        }
+
+        return nodes;
     }
+
+    private static void AddBracketMatches(
+        IEnumerable<NodeSelection> nodes,
+        ICollection<NodeSelection> matches,
+        string selector,
+        string parameterName)
+    {
+        foreach (var selection in nodes)
+        {
+            if (selector == "*")
+            {
+                if (selection.Node is JsonArray array)
+                {
+                    foreach (var item in array)
+                    {
+                        if (item is not null)
+                            matches.Add(new NodeSelection(item, GetElementType(selection.Type)));
+                    }
+                }
+                else if (selection.Node is JsonObject objectNode)
+                {
+                    foreach (var property in objectNode)
+                    {
+                        if (property.Value is not null)
+                            matches.Add(new NodeSelection(
+                                property.Value, GetPropertyType(selection.Type, property.Key)));
+                    }
+                }
+
+                continue;
+            }
+
+            if (selector.Length >= 2 && (selector[0] is '\'' or '"') && selector[^1] == selector[0])
+            {
+                var propertyName = selector[1..^1];
+                if (selection.Node is JsonObject parent &&
+                    parent.TryGetPropertyValue(propertyName, out var propertyValue) &&
+                    propertyValue is not null)
+                {
+                    matches.Add(new NodeSelection(
+                        propertyValue, GetPropertyType(selection.Type, propertyName)));
+                }
+            }
+            else if (int.TryParse(selector, NumberStyles.None, CultureInfo.InvariantCulture, out var index) &&
+                     selection.Node is JsonArray array &&
+                     index < array.Count &&
+                     array[index] is { } item)
+            {
+                matches.Add(new NodeSelection(item, GetElementType(selection.Type)));
+            }
+            else if (!int.TryParse(selector, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+            {
+                throw new ArgumentException(
+                    "Only quoted property names, array indices, and wildcards are supported in brackets.",
+                    parameterName);
+            }
+        }
+    }
+
+    private static Type GetPropertyType(Type parentType, string propertyName)
+    {
+        var typeInfo = SerializerOptions.GetTypeInfo(parentType);
+        if (typeInfo.Kind == JsonTypeInfoKind.Dictionary)
+            return typeInfo.ElementType ?? typeof(object);
+
+        foreach (var property in typeInfo.Properties)
+        {
+            if (property.Name == propertyName)
+                return property.PropertyType;
+        }
+
+        return typeof(object);
+    }
+
+    private static Type GetElementType(Type collectionType)
+    {
+        return SerializerOptions.GetTypeInfo(collectionType).ElementType ?? typeof(object);
+    }
+
+    private static void SetValue(JsonNode property, Type propertyType)
+    {
+        if (property is not JsonValue value)
+            return;
+
+        var underlyingType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        JsonNode? replacement;
+        if (underlyingType == typeof(DateTime))
+            replacement = JsonValue.Create(default(DateTime));
+        else if (underlyingType == typeof(DateTimeOffset))
+            replacement = JsonValue.Create(default(DateTimeOffset));
+        else if (underlyingType == typeof(TimeSpan))
+            replacement = JsonValue.Create(default(TimeSpan));
+        else
+        {
+            replacement = value.GetValueKind() switch
+            {
+                JsonValueKind.String => null,
+                JsonValueKind.Number => JsonValue.Create(0),
+                _ => property.DeepClone()
+            };
+        }
+
+        if (property.Parent is JsonObject parentObject)
+        {
+            foreach (var item in parentObject)
+            {
+                if (ReferenceEquals(item.Value, property))
+                {
+                    parentObject[item.Key] = replacement;
+                    return;
+                }
+            }
+        }
+        else if (property.Parent is JsonArray parentArray)
+        {
+            for (var index = 0; index < parentArray.Count; index++)
+            {
+                if (ReferenceEquals(parentArray[index], property))
+                {
+                    parentArray[index] = replacement;
+                    return;
+                }
+            }
+        }
+    }
+
+    private readonly record struct NodeSelection(JsonNode Node, Type Type);
 
     /// <summary>
     /// Serializes an object to JSON and writes it to the provided stream, resetting the position to 0 after writing.
@@ -112,7 +303,7 @@ public static class ObjectExtensions
             throw new ArgumentException("Stream must be writable.", nameof(stream));
         if (!stream.CanSeek)
             throw new ArgumentException("Stream must be seekable so the position can be reset to 0.", nameof(stream));
-        JsonSerializer.Serialize(stream, obj);
+        JsonSerializer.Serialize(stream, obj, obj.GetType());
         stream.Position = 0;
         return stream;
     }
@@ -135,7 +326,7 @@ public static class ObjectExtensions
         return obj switch
         {
             string objString => objString,
-            _ => JsonSerializer.ToJsonString(obj)
+            _ => JsonSerializer.Serialize(obj, obj.GetType())
         };
     }
 }
