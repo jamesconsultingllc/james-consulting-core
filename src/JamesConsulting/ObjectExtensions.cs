@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
@@ -219,7 +220,7 @@ public static class ObjectExtensions
 
             if (selector.Length >= 2 && (selector[0] is '\'' or '"') && selector[^1] == selector[0])
             {
-                var propertyName = selector[1..^1];
+                var propertyName = DecodeQuotedPropertyName(selector, parameterName);
                 if (selection.Node is JsonObject parent &&
                     parent.TryGetPropertyValue(propertyName, out var propertyValue) &&
                     propertyValue is not null)
@@ -245,8 +246,32 @@ public static class ObjectExtensions
         }
     }
 
+    private static string DecodeQuotedPropertyName(string selector, string parameterName)
+    {
+        var quote = selector[0];
+        var propertyName = new StringBuilder(selector.Length - 2);
+        for (var index = 1; index < selector.Length - 1; index++)
+        {
+            var current = selector[index];
+            if (current != '\\')
+            {
+                propertyName.Append(current);
+                continue;
+            }
+
+            if (++index >= selector.Length - 1 || selector[index] is not '\\' && selector[index] != quote)
+                throw new ArgumentException(
+                    "Quoted property names only support escaped quotes and backslashes.", parameterName);
+
+            propertyName.Append(selector[index]);
+        }
+
+        return propertyName.ToString();
+    }
+
     private static Type GetPropertyType(Type parentType, string propertyName)
     {
+        parentType = Nullable.GetUnderlyingType(parentType) ?? parentType;
         var typeInfo = SerializerOptions.GetTypeInfo(parentType);
         if (typeInfo.Kind == JsonTypeInfoKind.Dictionary)
             return typeInfo.ElementType ?? typeof(object);

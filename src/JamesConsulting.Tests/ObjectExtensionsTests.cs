@@ -113,6 +113,31 @@ public class ObjectExtensionsTests
     }
 
     [Fact]
+    public void MaskDecodesEscapedQuotedPropertyNames()
+    {
+        var data = new Dictionary<string, string>
+        {
+            ["Card\\Number"] = "private",
+            ["Card'Number"] = "also private"
+        };
+
+        var masked = data.Mask("['Card\\\\Number']", "['Card\\'Number']");
+
+        masked["Card\\Number"].Should().BeNull();
+        masked["Card'Number"].Should().BeNull();
+    }
+
+    [Fact]
+    public void MaskRejectsUnsupportedQuotedPropertyNameEscapes()
+    {
+        var data = new Dictionary<string, string> { ["CardqNumber"] = "private" };
+
+        var exception = Assert.Throws<ArgumentException>(() => data.Mask("['Card\\qNumber']"));
+
+        exception.ParamName.Should().Be("propertiesToMask");
+    }
+
+    [Fact]
     public void MaskDefaultsStringEncodedValueTypes()
     {
         var test = new StringEncodedValueTypes
@@ -129,6 +154,20 @@ public class ObjectExtensionsTests
         masked.Date.Should().Be(DateOnly.MinValue);
         masked.Time.Should().Be(TimeOnly.MinValue);
         masked.Character.Should().Be('\0');
+    }
+
+    [Fact]
+    public void MaskResolvesPropertiesOnNullableStructs()
+    {
+        var test = new NullableStructProperty
+        {
+            Details = new StructDetails { Timestamp = DateTime.UtcNow }
+        };
+
+        var masked = test.Mask("Details.Timestamp");
+
+        masked.Details.Should().NotBeNull();
+        masked.Details!.Value.Timestamp.Should().Be(default);
     }
 
     [Fact]
@@ -320,6 +359,16 @@ public class ObjectExtensionsTests
         public DateOnly Date { get; set; }
         public TimeOnly Time { get; set; }
         public char Character { get; set; }
+    }
+
+    private sealed class NullableStructProperty
+    {
+        public StructDetails? Details { get; set; }
+    }
+
+    private struct StructDetails
+    {
+        public DateTime Timestamp { get; set; }
     }
 
     /// <summary>
