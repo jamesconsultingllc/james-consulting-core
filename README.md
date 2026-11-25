@@ -40,6 +40,7 @@ dotnet add package JamesConsulting
 | `JamesConsulting.Cryptography` | Hashing/encoding helpers on top of `string` |
 | `JamesConsulting.Hosting` | `HostExtensions`, `IHostInitializer` / `IHostInitializerAsync` — run async one-shot startup work inside `IHost` before `RunAsync()` |
 | `JamesConsulting.IO` | `StreamExtensions` (read-to-end, copy with progress, etc.) |
+| `JamesConsulting.Logging` | Buffering ("dump-on-error") logger — buffers Debug/Trace per scope and dumps them to your sinks only when an error is logged. See [Buffering logger](#buffering-dump-on-error-logger). |
 | `JamesConsulting.Net` | `ConnectToSharedFolder` — UNC/SMB credential impersonation. `Connect()` is Windows-only and throws `PlatformNotSupportedException` on macOS/Linux; `Dispose()` and the finalizer are safe no-ops on non-Windows. |
 | `JamesConsulting.Reflection` | `TypeExtensions` (default value resolution, async-method detection), `MethodInfoExtensions` |
 | `JamesConsulting.Security` | `SecureStringExtensions`, additional `StringExtensions` |
@@ -61,6 +62,105 @@ step-into debugging.
   the obsolete 8.0.0 build-time package.
 - **Mask selectors.** Dot-delimited properties, quoted bracket properties, array indices, and array
   wildcards are supported. Json.NET-specific filters and recursive-descent selectors are not.
+## Buffering ("dump-on-error") logger
+
+`JamesConsulting.Logging` adds a logger that **buffers low-level logs in memory and only writes them
+when something goes wrong**. During normal operation your sinks stay quiet; the moment an `Error` (or
+`Critical`) is logged, the whole buffer of `Debug`/`Trace` context leading up to the failure is
+dumped — so you get rich diagnostics exactly when you need them, without the noise (or cost) the rest
+of the time.
+
+This is the **auto-flush-on-error** trigger that .NET's built-in log buffering doesn't provide (its
+buffer only flushes manually).
+
+### How records are routed
+
+Your host's existing live logging configuration (e.g. `Logging:LogLevel:Default`) stays **completely
+authoritative** for what is written live — buffering never overrides it. On top of that, two
+thresholds (`BufferLevel ≤ FlushLevel`) drive capture and the dump trigger:
+
+| Record level | Behaviour |
+|---|---|
+| written live by your configuration | written live as normal (buffering doesn't touch it) |
+| below the live threshold but `≥ BufferLevel` | captured into the active scope; emitted only on flush |
+| below `BufferLevel` | dropped |
+| `≥ FlushLevel`, inside a scope | flushes the scope (dumps the buffer + the triggering record) |
+| `≥ FlushLevel`, no scope | follows your live configuration (nothing to dump) |
+
+Defaults: `BufferLevel = Trace`, `FlushLevel = Error`. The live threshold is whatever your
+`Logging:LogLevel` configuration already says.
+
+### Usage
+
+```csharp
+using JamesConsulting.Logging;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+services.AddLogging(logging =>
+{
+    logging.AddConsole();
+    logging.AddBufferingLogging(o =>
+    {
+        o.BufferLevel = LogLevel.Trace;  // how deep to capture
+        o.FlushLevel = LogLevel.Error;   // what triggers the dump
+    });
+});
+```
+
+Your `Logging:LogLevel` configuration continues to control live logging unchanged — set it to
+`Information` (or whatever you like) and `Debug`/`Trace` are buffered, then dumped on error.
+
+Wrap a logical operation (request, message handler, job) in a buffering scope:
+
+```csharp
+public async Task ProcessAsync(ILogger<OrderService> logger, int orderId)
+{
+    using (LogBuffer.BeginScope())
+    {
+        logger.LogDebug("Loading order {OrderId}", orderId);     // buffered
+        logger.LogInformation("Order {OrderId} loaded", orderId); // written live
+
+        try
+        {
+            // ... work ...
+        }
+        catch (Exception ex)
+        {
+            // The buffered Debug record above is dumped first, then this error.
+            logger.LogError(ex, "Failed to process order {OrderId}", orderId);
+            throw;
+        }
+    }
+    // No error? The Debug record is discarded when the scope is disposed.
+}
+```
+
+> **Dumped records reach your sinks without extra filter configuration.** The error dump is
+> replayed **directly to the registered logging providers**, bypassing the
+> Microsoft.Extensions.Logging factory-level filters (the `Logging:LogLevel` category/provider rules).
+> That is deliberate: the whole point of a dump-on-error buffer is to surface the low-level context
+> your live configuration suppresses, so a plain `Logging:LogLevel:Default = Information` setting is all
+> you need — buffered `Debug`/`Trace` still appears on error. One consequence: an error replays the
+> buffered context to **every** registered provider, even one whose own configured level would normally
+> exclude those records.
+>
+> **The edge case:** if no logging providers are registered (or a custom inner factory whose providers
+> weren't surfaced to the decorator), the replay target reaches nothing, so the buffered context can't
+> be dumped — only the triggering `Error`/`Critical` record falls back to the inner logger and follows
+> your live configuration. Any realistic setup with at least one provider (e.g. `AddConsole()`) dumps to
+> every registered sink.
+
+> **Replay fidelity.** Object-valued structured properties (e.g. `logger.LogDebug("processing {Order}",
+> order)`) are frozen to their `ToString()` text at log time so a later mutation can't change what the
+> dump reports — a destructuring sink therefore receives the frozen text, not the live object. Scalar
+> values (strings, numbers, enums, `DateTime`, `Guid`, …) keep their original type. Records are replayed
+> in chronological order within a logical flow (nested scopes dump ancestors first); ordering is
+> best-effort under concurrent logging on the same scope.
+
+Buffering is AsyncLocal-scoped (it flows across `await`), thread-safe, and bounded by a ring buffer
+(default capacity 1000, drop-oldest on overflow). Buffered records do **not** capture
+`ILogger.BeginScope` state — matching the built-in .NET buffering.
 
 ---
 
@@ -172,10 +272,14 @@ the new numeric version with prerelease settings and tags from the existing comm
 
 ## Contributing
 
-1. Branch from `develop` (`feature/<name>` or `bugfix/<name>`).
+1. Branch from `develop` (`feature/<name>` or `bugfix/<name>`, or a child of another development
+   branch). All work targets `develop` — never branch from or push to `master`.
 2. Tests first — this repo follows BDD/TDD with a 90% coverage target.
 3. Run `dotnet build` and `dotnet test` locally before pushing.
 4. Open a PR into `develop`. CI must be green and Sonar quality gate must pass.
+
+> Releasing (cutting `release/**` branches, merging into `master`, and tagging) is restricted to the
+> maintainer, James Consulting LLC. Contributions stop at a PR into `develop`.
 
 Repo conventions live in [`AGENTS.md`](AGENTS.md).
 

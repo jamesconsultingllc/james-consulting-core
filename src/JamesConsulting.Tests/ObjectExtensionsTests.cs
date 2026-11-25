@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using FluentAssertions;
 using Xunit;
 
@@ -94,6 +95,56 @@ public class ObjectExtensionsTests
 
         masked["Value.With.Dot"].Should().BeNull();
         masked["Keep"].Should().Be("visible");
+    }
+
+    [Fact]
+    public void MaskSupportsQuotedPropertyNamesContainingClosingBrackets()
+    {
+        var data = new Dictionary<string, string>
+        {
+            ["Value]With.Dot"] = "private",
+            ["Keep"] = "visible"
+        };
+
+        var masked = data.Mask("['Value]With.Dot']");
+
+        masked["Value]With.Dot"].Should().BeNull();
+        masked["Keep"].Should().Be("visible");
+    }
+
+    [Fact]
+    public void MaskDefaultsStringEncodedValueTypes()
+    {
+        var test = new StringEncodedValueTypes
+        {
+            Id = Guid.NewGuid(),
+            Date = new DateOnly(2024, 3, 14),
+            Time = new TimeOnly(15, 9),
+            Character = 'X'
+        };
+
+        var masked = test.Mask("Id", "Date", "Time", "Character");
+
+        masked.Id.Should().Be(Guid.Empty);
+        masked.Date.Should().Be(DateOnly.MinValue);
+        masked.Time.Should().Be(TimeOnly.MinValue);
+        masked.Character.Should().Be('\0');
+    }
+
+    [Fact]
+    public void MaskWildcardsReplaceLargeArraysAndDictionaries()
+    {
+        var values = Enumerable.Range(0, 2048).ToArray();
+        var array = values.Select(value => $"secret-{value}").ToArray();
+        var dictionary = values.ToDictionary(value => $"key-{value}", value => $"secret-{value}");
+
+        var maskedArray = array.Mask("$[*]");
+        var maskedDictionary = dictionary.Mask("$[*]");
+
+        maskedArray.Should().HaveCount(values.Length);
+        maskedArray.Should().OnlyContain(value => value == null);
+        maskedDictionary.Should().HaveCount(values.Length);
+        maskedDictionary.Values.Should().OnlyContain(value => value == null);
     }
 
     [Fact]
@@ -261,6 +312,14 @@ public class ObjectExtensionsTests
         /// Gets or sets the value 2.
         /// </summary>
         public int Value3 { get; set; }
+    }
+
+    private sealed class StringEncodedValueTypes
+    {
+        public Guid Id { get; set; }
+        public DateOnly Date { get; set; }
+        public TimeOnly Time { get; set; }
+        public char Character { get; set; }
     }
 
     /// <summary>

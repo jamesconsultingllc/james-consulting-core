@@ -73,7 +73,7 @@ public static class ObjectExtensions
         foreach (var path in propertiesToMask)
         {
             foreach (var selection in SelectTokens(root, data.GetType(), path, nameof(propertiesToMask)))
-                SetValue(selection.Node, selection.Type);
+                SetValue(selection);
         }
 
         return root.Deserialize<T>(SerializerOptions)!;
@@ -101,7 +101,7 @@ public static class ObjectExtensions
             var nextNodes = new List<NodeSelection>();
             if (path[index] == '[')
             {
-                var closeIndex = path.IndexOf(']', index + 1);
+                var closeIndex = FindClosingBracket(path, index);
                 if (closeIndex < 0)
                     throw new ArgumentException("The property path contains an unmatched '['.", parameterName);
 
@@ -126,7 +126,8 @@ public static class ObjectExtensions
                         {
                             if (property.Value is not null)
                                 nextNodes.Add(new NodeSelection(
-                                    property.Value, GetPropertyType(selection.Type, property.Key)));
+                                    property.Value, GetPropertyType(selection.Type, property.Key),
+                                    objectNode, property.Key));
                         }
                     }
                     else if (selection.Node is JsonObject parent &&
@@ -134,7 +135,8 @@ public static class ObjectExtensions
                              propertyValue is not null)
                     {
                         nextNodes.Add(new NodeSelection(
-                            propertyValue, GetPropertyType(selection.Type, propertyName)));
+                            propertyValue, GetPropertyType(selection.Type, propertyName),
+                            parent, propertyName));
                     }
                 }
             }
@@ -145,6 +147,41 @@ public static class ObjectExtensions
         }
 
         return nodes;
+    }
+
+    private static int FindClosingBracket(string path, int openIndex)
+    {
+        var quote = '\0';
+        var escaped = false;
+        for (var index = openIndex + 1; index < path.Length; index++)
+        {
+            var current = path[index];
+            if (quote != '\0')
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (current == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (current == quote)
+                    quote = '\0';
+                continue;
+            }
+
+            if (current is '\'' or '"')
+                quote = current;
+            else if (current == ']')
+                return index;
+        }
+
+        return -1;
     }
 
     private static void AddBracketMatches(
@@ -159,10 +196,11 @@ public static class ObjectExtensions
             {
                 if (selection.Node is JsonArray array)
                 {
-                    foreach (var item in array)
+                    for (var index = 0; index < array.Count; index++)
                     {
-                        if (item is not null)
-                            matches.Add(new NodeSelection(item, GetElementType(selection.Type)));
+                        if (array[index] is { } item)
+                            matches.Add(new NodeSelection(
+                                item, GetElementType(selection.Type), array, ArrayIndex: index));
                     }
                 }
                 else if (selection.Node is JsonObject objectNode)
@@ -171,7 +209,8 @@ public static class ObjectExtensions
                     {
                         if (property.Value is not null)
                             matches.Add(new NodeSelection(
-                                property.Value, GetPropertyType(selection.Type, property.Key)));
+                                property.Value, GetPropertyType(selection.Type, property.Key),
+                                objectNode, property.Key));
                     }
                 }
 
@@ -186,7 +225,8 @@ public static class ObjectExtensions
                     propertyValue is not null)
                 {
                     matches.Add(new NodeSelection(
-                        propertyValue, GetPropertyType(selection.Type, propertyName)));
+                        propertyValue, GetPropertyType(selection.Type, propertyName),
+                        parent, propertyName));
                 }
             }
             else if (int.TryParse(selector, NumberStyles.None, CultureInfo.InvariantCulture, out var index) &&
@@ -194,7 +234,7 @@ public static class ObjectExtensions
                      index < array.Count &&
                      array[index] is { } item)
             {
-                matches.Add(new NodeSelection(item, GetElementType(selection.Type)));
+                matches.Add(new NodeSelection(item, GetElementType(selection.Type), array, ArrayIndex: index));
             }
             else if (!int.TryParse(selector, NumberStyles.None, CultureInfo.InvariantCulture, out _))
             {
@@ -225,19 +265,16 @@ public static class ObjectExtensions
         return SerializerOptions.GetTypeInfo(collectionType).ElementType ?? typeof(object);
     }
 
-    private static void SetValue(JsonNode property, Type propertyType)
+    private static void SetValue(NodeSelection selection)
     {
+        var property = selection.Node;
         if (property is not JsonValue value)
             return;
 
-        var underlyingType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        var underlyingType = Nullable.GetUnderlyingType(selection.Type) ?? selection.Type;
         JsonNode? replacement;
-        if (underlyingType == typeof(DateTime))
-            replacement = JsonValue.Create(default(DateTime));
-        else if (underlyingType == typeof(DateTimeOffset))
-            replacement = JsonValue.Create(default(DateTimeOffset));
-        else if (underlyingType == typeof(TimeSpan))
-            replacement = JsonValue.Create(default(TimeSpan));
+        if (value.GetValueKind() == JsonValueKind.String && underlyingType.IsValueType)
+            replacement = JsonSerializer.SerializeToNode(Activator.CreateInstance(underlyingType), underlyingType);
         else
         {
             replacement = value.GetValueKind() switch
@@ -248,31 +285,18 @@ public static class ObjectExtensions
             };
         }
 
-        if (property.Parent is JsonObject parentObject)
+        if (selection.Parent is JsonObject parentObject && selection.PropertyName is not null)
         {
-            foreach (var item in parentObject)
-            {
-                if (ReferenceEquals(item.Value, property))
-                {
-                    parentObject[item.Key] = replacement;
-                    return;
-                }
-            }
+            parentObject[selection.PropertyName] = replacement;
         }
-        else if (property.Parent is JsonArray parentArray)
+        else if (selection.Parent is JsonArray parentArray && selection.ArrayIndex is int index)
         {
-            for (var index = 0; index < parentArray.Count; index++)
-            {
-                if (ReferenceEquals(parentArray[index], property))
-                {
-                    parentArray[index] = replacement;
-                    return;
-                }
-            }
+            parentArray[index] = replacement;
         }
     }
 
-    private readonly record struct NodeSelection(JsonNode Node, Type Type);
+    private readonly record struct NodeSelection(
+        JsonNode Node, Type Type, JsonNode? Parent = null, string? PropertyName = null, int? ArrayIndex = null);
 
     /// <summary>
     /// Serializes an object to JSON and writes it to the provided stream, resetting the position to 0 after writing.
