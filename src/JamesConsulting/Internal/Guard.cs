@@ -25,11 +25,7 @@ namespace JamesConsulting.Internal
             [CallerArgumentExpression("value")] string? name = null)
             where T : class
         {
-#if NET6_0_OR_GREATER
             ArgumentNullException.ThrowIfNull(value, name);
-#else
-            if (value is null) throw new ArgumentNullException(name);
-#endif
         }
 
         /// <summary>
@@ -91,30 +87,3 @@ namespace JamesConsulting.Internal
         }
     }
 }
-
-#if !NET5_0_OR_GREATER
-namespace System.Runtime.CompilerServices
-{
-    [AttributeUsage(AttributeTargets.Parameter)]
-    internal sealed class CallerArgumentExpressionAttribute : Attribute
-    {
-        public CallerArgumentExpressionAttribute(string parameterName)
-        {
-            ParameterName = parameterName;
-        }
-
-        public string ParameterName { get; }
-    }
-}
-#endif
-
-#if NETSTANDARD2_0
-namespace System.Diagnostics.CodeAnalysis
-{
-    [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property |
-                    AttributeTargets.ReturnValue)]
-    internal sealed class NotNullAttribute : Attribute
-    {
-    }
-}
-#endif

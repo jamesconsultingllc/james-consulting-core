@@ -54,7 +54,7 @@ The consuming application owns all configuration. The library provides the build
 |---------|---------|
 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` | Track public API surface changes |
 | `MinVer` or `GitVersion` | SemVer from git tags |
-| `Microsoft.SourceLink.GitHub` | Source link for debugging NuGet consumers |
+| SourceLink (included in the .NET SDK) | Source link for debugging NuGet consumers; no separate package reference is needed |
 
 ---
 
@@ -97,11 +97,11 @@ tests/
 
 ## Multi-Targeting
 
-Support the two most recent .NET LTS/current versions:
+Support the two most recent .NET versions:
 
 ```xml
 <PropertyGroup>
-  <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+  <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
   <LangVersion>latest</LangVersion>
   <Nullable>enable</Nullable>
   <ImplicitUsings>enable</ImplicitUsings>
@@ -114,11 +114,11 @@ Support the two most recent .NET LTS/current versions:
 When using APIs only available in newer targets:
 
 ```csharp
-#if NET10_0_OR_GREATER
-    // Use new .NET 10 API
+#if NET11_0_OR_GREATER
+    // Use new .NET 11 API
     return span.TrySplit(separator, out var left, out var right);
 #else
-    // Fallback for .NET 9
+    // Fallback for .NET 10
     var index = span.IndexOf(separator);
     if (index < 0) return false;
     left = span[..index];
@@ -579,7 +579,7 @@ These sections from the shared AGENTS.md are **application-level concerns** — 
 
 ## Library Checklist (Pre-Merge)
 
-- [ ] Multi-targets `net9.0;net10.0` (or current two supported versions)
+- [ ] Multi-targets `net10.0;net11.0` (or the current two supported versions)
 - [ ] `PublicApiAnalyzers` tracks API surface — no unintentional breaking changes
 - [ ] SemVer applied correctly (patch/minor/major per rules above)
 - [ ] NuGet metadata complete (PackageId, Authors, Description, README, SourceLink)

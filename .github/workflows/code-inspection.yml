@@ -43,8 +43,8 @@ jobs:
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
           dotnet-version: |
-            9.0.x
             10.0.x
+            11.0.x
 
       # Determine changed .cs files FIRST so we can short-circuit the
       # rest of the job when a PR only touches non-.cs paths

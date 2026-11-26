@@ -8,12 +8,13 @@
 [![Docs](https://img.shields.io/badge/docs-jamesconsulting.biz-blue?logo=readthedocs)](https://docs.jamesconsulting.biz/james-consulting-core/)
 
 > A small, opinionated grab-bag of extension methods, helpers, and primitives shared across all
-> James Consulting LLC libraries. Multi-targets `netstandard2.0`, `netstandard2.1`, `net9.0`, and
-> `net10.0` so it can drop into virtually any .NET project.
+> James Consulting LLC libraries. Targets `net10.0` and `net11.0`.
 
 ---
 
 ## Install
+
+Version 3.0 is in development. These examples install the currently published 2.x stable release.
 
 ```bash
 dotnet add package JamesConsulting
@@ -52,6 +53,15 @@ step-into debugging.
 
 ---
 
+## 3.0 (in development)
+
+- **Modern target frameworks.** Targets `net10.0` and `net11.0`; older frameworks are no longer supported.
+- **Built-in JSON.** JSON helpers use `System.Text.Json` from the .NET shared framework, removing the
+  Newtonsoft.Json and Utf8Json package dependencies without adding a package.
+- **SDK-provided SourceLink.** Uses the SourceLink support built into the .NET SDK instead of pinning
+  the obsolete 8.0.0 build-time package.
+- **Mask selectors.** Dot-delimited properties, quoted bracket properties, array indices, and array
+  wildcards are supported. Json.NET-specific filters and recursive-descent selectors are not.
 ## Buffering ("dump-on-error") logger
 
 `JamesConsulting.Logging` adds a logger that **buffers low-level logs in memory and only writes them
@@ -183,6 +193,8 @@ This is a **breaking** modernization. If you're upgrading from `1.x`, read this 
 
 ## Build & test
 
+Use the .NET 11 SDK, with the .NET 10 runtime installed to run tests for both targets.
+
 ```bash
 # from repo root
 dotnet restore src/JamesConsulting.sln
@@ -193,7 +205,7 @@ dotnet test    src/JamesConsulting.sln --configuration Release
 Single TFM:
 
 ```bash
-dotnet test src/JamesConsulting.Tests/JamesConsulting.Tests.csproj --framework net9.0
+dotnet test src/JamesConsulting.Tests/JamesConsulting.Tests.csproj --framework net11.0
 ```
 
 Filter to a single test:
@@ -201,6 +213,60 @@ Filter to a single test:
 ```bash
 dotnet test --filter "FullyQualifiedName~ObjectExtensionsTests.Mask"
 ```
+
+---
+
+## Release process
+
+Releases follow GitFlow + semver. NBGV reads the committed `version.json`; do not override
+`Version`, `PackageVersion`, or `VersionSuffix` on the build command line. The `ci.yml` workflow
+has three jobs:
+
+| Trigger | Job | Output |
+|---|---|---|
+| Tracked branch push / PR / dispatch | `build-test` | Build, test, Sonar, coverage, and a CI-only package with NBGV's commit suffix (for example, `3.0.0-alpha.N.g<sha>`), using `PublicRelease=false`. |
+| Push to `release/X.Y.Z` | `publish-rc` | Signs and publishes `X.Y.Z-rc.N` via NuGet Trusted Publishing. `N` is NBGV's Git version height, not the Actions run number; the version must match the release branch. |
+| Push tag `vX.Y.Z` | `publish-stable` | Requires the computed version to equal `X.Y.Z` and the tagged commit to be reachable from `master`, then signs, publishes, and creates a GitHub Release. |
+
+Before signing, both publishing jobs verify that exactly one package exists and that its ID,
+embedded version, and filename match the expected release. Only that verified file is pushed.
+
+The current development line is `3.0.0-alpha.{height}`. Cutting the 3.0 release:
+
+```bash
+# 1. cut release branch from develop
+git switch develop && git pull
+dotnet tool restore
+git flow release start 3.0.0
+dotnet nbgv set-version '3.0.0-rc.{height}'
+git add version.json
+git commit -m "chore(release): start 3.0.0 RC"
+git push -u origin release/3.0.0
+# -> publish-rc publishes 3.0.0-rc.N
+
+# 2. when QA approves, set the stable version on the release branch
+dotnet nbgv set-version 3.0.0
+git add version.json
+git commit -m "chore(release): finalize 3.0.0"
+# Do NOT push this stable-version commit to release/3.0.0.
+dotnet nbgv get-version -p src/JamesConsulting -v NuGetPackageVersion
+# -> 3.0.0
+
+# 3. finish: merge into master, tag v3.0.0, and back-merge into develop
+git flow release finish 3.0.0
+git push origin master develop --follow-tags
+# -> publish-stable publishes 3.0.0 + GitHub Release
+
+# 4. start the next development cycle
+git switch develop
+dotnet nbgv set-version '3.1.0-alpha.{height}'
+git add version.json
+git commit -m "chore(develop): start 3.1.0-alpha"
+git push
+```
+
+Commit version changes before checking NBGV's output or packing: an uncommitted edit can combine
+the new numeric version with prerelease settings and tags from the existing commit.
 
 ---
 
