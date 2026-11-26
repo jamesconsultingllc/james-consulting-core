@@ -1,10 +1,12 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using JamesConsulting.Internal;
 
@@ -24,6 +26,9 @@ public static class ObjectExtensions
     // Mask round-trips an in-memory object, so it must use one case-sensitive contract (including public
     // fields) for serialization, metadata lookup, and deserialization. Case-insensitive matching is only
     // appropriate for external input, which uses SerializerOptions.
+    private static readonly ConcurrentDictionary<JsonConverter, JsonSerializerOptions> ConverterSerializerOptions =
+        new(ReferenceEqualityComparer.Instance);
+
     private static readonly JsonSerializerOptions MaskSerializerOptions = new()
     {
         IncludeFields = true,
@@ -64,6 +69,10 @@ public static class ObjectExtensions
     /// <paramref name="data" /> or <paramref name="propertiesToMask" /> is <c>null</c>.
     /// </exception>
     /// <exception cref="ArgumentException"><paramref name="propertiesToMask" /> is empty.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A path explicitly names a read-only or computed member, which the masked copy cannot carry.
+    /// Wildcards skip such members. Polymorphic type discriminators are never masked.
+    /// </exception>
     /// <example>
     /// Mask properties.
     /// <code>
@@ -136,20 +145,11 @@ public static class ObjectExtensions
                     if (propertyName == "*" && selection.Node is JsonObject objectNode)
                     {
                         foreach (var property in objectNode)
-                        {
-                            if (property.Value is not null)
-                                nextNodes.Add(new NodeSelection(
-                                    property.Value, GetPropertyType(selection.Type, objectNode, property.Key),
-                                    objectNode, property.Key));
-                        }
+                            AddPropertyMatch(nextNodes, selection, objectNode, property.Key, isWildcard: true);
                     }
-                    else if (selection.Node is JsonObject parent &&
-                             parent.TryGetPropertyValue(propertyName, out var propertyValue) &&
-                             propertyValue is not null)
+                    else if (selection.Node is JsonObject parent)
                     {
-                        nextNodes.Add(new NodeSelection(
-                            propertyValue, GetPropertyType(selection.Type, parent, propertyName),
-                            parent, propertyName));
+                        AddPropertyMatch(nextNodes, selection, parent, propertyName, isWildcard: false);
                     }
                 }
             }
@@ -219,12 +219,7 @@ public static class ObjectExtensions
                 else if (selection.Node is JsonObject objectNode)
                 {
                     foreach (var property in objectNode)
-                    {
-                        if (property.Value is not null)
-                            matches.Add(new NodeSelection(
-                                property.Value, GetPropertyType(selection.Type, objectNode, property.Key),
-                                objectNode, property.Key));
-                    }
+                        AddPropertyMatch(matches, selection, objectNode, property.Key, isWildcard: true);
                 }
 
                 continue;
@@ -233,14 +228,8 @@ public static class ObjectExtensions
             if (selector.Length >= 2 && (selector[0] is '\'' or '"') && selector[^1] == selector[0])
             {
                 var propertyName = DecodeQuotedPropertyName(selector, parameterName);
-                if (selection.Node is JsonObject parent &&
-                    parent.TryGetPropertyValue(propertyName, out var propertyValue) &&
-                    propertyValue is not null)
-                {
-                    matches.Add(new NodeSelection(
-                        propertyValue, GetPropertyType(selection.Type, parent, propertyName),
-                        parent, propertyName));
-                }
+                if (selection.Node is JsonObject parent)
+                    AddPropertyMatch(matches, selection, parent, propertyName, isWildcard: false);
             }
             else if (int.TryParse(selector, NumberStyles.None, CultureInfo.InvariantCulture, out var index) &&
                      selection.Node is JsonArray array &&
@@ -281,20 +270,53 @@ public static class ObjectExtensions
         return propertyName.ToString();
     }
 
-    private static Type GetPropertyType(Type parentType, JsonObject parentNode, string propertyName)
+    private static void AddPropertyMatch(
+        ICollection<NodeSelection> matches,
+        NodeSelection selection,
+        JsonObject parent,
+        string propertyName,
+        bool isWildcard)
+    {
+        if (!parent.TryGetPropertyValue(propertyName, out var propertyValue) || propertyValue is null)
+            return;
+
+        var member = GetMemberContract(selection.Type, parent, propertyName);
+
+        // Type discriminators are serializer metadata, not data; masking them breaks deserialization.
+        if (member.IsTypeDiscriminator)
+            return;
+
+        // A wildcard skips members the masked copy cannot carry (computed or read-only). They never hold
+        // the source instance's state after deserialization, so there is nothing to mask.
+        if (isWildcard && !member.IsWritable)
+            return;
+
+        matches.Add(new NodeSelection(
+            propertyValue, member.Type, parent, propertyName,
+            Converter: member.Converter, IsWritable: member.IsWritable));
+    }
+
+    private static MemberContract GetMemberContract(Type parentType, JsonObject parentNode, string propertyName)
     {
         parentType = Nullable.GetUnderlyingType(parentType) ?? parentType;
-        var typeInfo = ResolveDerivedTypeInfo(MaskSerializerOptions.GetTypeInfo(parentType), parentNode);
+        var declaredTypeInfo = MaskSerializerOptions.GetTypeInfo(parentType);
+        if (declaredTypeInfo.PolymorphismOptions?.TypeDiscriminatorPropertyName == propertyName)
+            return new MemberContract(typeof(object), IsTypeDiscriminator: true);
+
+        var typeInfo = ResolveDerivedTypeInfo(declaredTypeInfo, parentNode);
         if (typeInfo.Kind == JsonTypeInfoKind.Dictionary)
-            return typeInfo.ElementType ?? typeof(object);
+            return new MemberContract(typeInfo.ElementType ?? typeof(object));
 
         foreach (var property in typeInfo.Properties)
         {
             if (property.Name == propertyName)
-                return property.PropertyType;
+                return new MemberContract(
+                    property.PropertyType,
+                    Converter: property.CustomConverter,
+                    IsWritable: property.Set is not null || property.AssociatedParameter is not null);
         }
 
-        return typeof(object);
+        return new MemberContract(typeof(object));
     }
 
     private static JsonTypeInfo ResolveDerivedTypeInfo(JsonTypeInfo typeInfo, JsonObject node)
@@ -327,24 +349,15 @@ public static class ObjectExtensions
 
     private static void SetValue(NodeSelection selection)
     {
-        var property = selection.Node;
-        if (property is not JsonValue value)
+        if (selection.Node is not JsonValue value)
             return;
 
-        var underlyingType = Nullable.GetUnderlyingType(selection.Type) ?? selection.Type;
-        JsonNode? replacement;
-        if (value.GetValueKind() == JsonValueKind.String && underlyingType.IsValueType)
-            replacement = JsonSerializer.SerializeToNode(
-                Activator.CreateInstance(underlyingType), underlyingType, MaskSerializerOptions);
-        else
-        {
-            replacement = value.GetValueKind() switch
-            {
-                JsonValueKind.String => null,
-                JsonValueKind.Number => JsonValue.Create(0),
-                _ => property.DeepClone()
-            };
-        }
+        if (!selection.IsWritable)
+            throw new InvalidOperationException(
+                $"The member '{selection.PropertyName}' cannot be masked because it has no setter or " +
+                "constructor parameter, so the masked copy would not reflect the masked value.");
+
+        var replacement = CreateDefaultValue(selection.Type, selection.Converter, value);
 
         if (selection.Parent is JsonObject parentObject && selection.PropertyName is not null)
         {
@@ -356,8 +369,46 @@ public static class ObjectExtensions
         }
     }
 
+    private static JsonNode? CreateDefaultValue(Type type, JsonConverter? converter, JsonValue value)
+    {
+        // Unknown member type (for example object-valued dictionaries): infer a default from the JSON kind.
+        if (type == typeof(object))
+        {
+            return value.GetValueKind() switch
+            {
+                JsonValueKind.Number => JsonValue.Create(0),
+                JsonValueKind.True or JsonValueKind.False => JsonValue.Create(false),
+                _ => null
+            };
+        }
+
+        // default(T) for reference and nullable value types is null.
+        if (!type.IsValueType || Nullable.GetUnderlyingType(type) is not null)
+            return null;
+
+        // Serialize default(T) through the member's own converter so property-level converters
+        // (string enums, custom formats) produce a value they can read back.
+        var options = converter is null
+            ? MaskSerializerOptions
+            : ConverterSerializerOptions.GetOrAdd(
+                converter, static c => new JsonSerializerOptions(MaskSerializerOptions) { Converters = { c } });
+        return JsonSerializer.SerializeToNode(Activator.CreateInstance(type), type, options);
+    }
+
     private readonly record struct NodeSelection(
-        JsonNode Node, Type Type, JsonNode? Parent = null, string? PropertyName = null, int? ArrayIndex = null);
+        JsonNode Node,
+        Type Type,
+        JsonNode? Parent = null,
+        string? PropertyName = null,
+        int? ArrayIndex = null,
+        JsonConverter? Converter = null,
+        bool IsWritable = true);
+
+    private readonly record struct MemberContract(
+        Type Type,
+        JsonConverter? Converter = null,
+        bool IsWritable = true,
+        bool IsTypeDiscriminator = false);
 
     /// <summary>
     /// Serializes an object to JSON and writes it to the provided stream, resetting the position to 0 after writing.

@@ -264,6 +264,98 @@ public class ObjectExtensionsTests
     }
 
     [Fact]
+    public void MaskWildcardDoesNotRemovePolymorphicTypeDiscriminator()
+    {
+        var test = new PolymorphicContainer
+        {
+            Item = new DerivedItem { Name = "secret", Timestamp = DateTime.UtcNow }
+        };
+
+        var masked = test.Mask("Item.*");
+
+        var item = masked.Item.Should().BeOfType<DerivedItem>().Subject;
+        item.Name.Should().BeNull();
+        item.Timestamp.Should().Be(default);
+    }
+
+    [Fact]
+    public void MaskIgnoresExplicitPolymorphicTypeDiscriminator()
+    {
+        var test = new PolymorphicContainer { Item = new DerivedItem { Name = "keep" } };
+
+        var masked = test.Mask("Item['$type']");
+
+        masked.Item.Should().BeOfType<DerivedItem>().Which.Name.Should().Be("keep");
+    }
+
+    [Fact]
+    public void MaskPolymorphicItemsInCollections()
+    {
+        var test = new PolymorphicCollection
+        {
+            Items = [new DerivedItem { Name = "a", Timestamp = DateTime.UtcNow }, new BaseItem { Name = "b" }]
+        };
+
+        var masked = test.Mask("Items[*].Timestamp");
+
+        masked.Items![0].Should().BeOfType<DerivedItem>().Which.Timestamp.Should().Be(default);
+        masked.Items[1].Should().BeOfType<BaseItem>().Which.Name.Should().Be("b");
+    }
+
+    [Fact]
+    public void MaskUsesPropertyLevelEnumConverters()
+    {
+        var test = new ConvertedMembers { Status = StrictStatus.Active, Other = StrictStatus.Active };
+
+        var masked = test.Mask("Status", "Other");
+
+        masked.Status.Should().Be(StrictStatus.None);
+        masked.Other.Should().Be(StrictStatus.None);
+    }
+
+    [Fact]
+    public void MaskUsesPropertyLevelCustomConverters()
+    {
+        var test = new ConvertedMembers { Day = new DateTime(2026, 11, 25, 0, 0, 0, DateTimeKind.Unspecified) };
+
+        var masked = test.Mask("Day");
+
+        masked.Day.Should().Be(default);
+    }
+
+    [Fact]
+    public void MaskSetsBooleansToDefault()
+    {
+        var test = new BooleanModel { IsAdmin = true, MaybeAdmin = true };
+
+        var masked = test.Mask("IsAdmin", "MaybeAdmin");
+
+        masked.IsAdmin.Should().BeFalse();
+        masked.MaybeAdmin.Should().BeNull();
+    }
+
+    [Fact]
+    public void MaskMasksPublicFieldsOnStructsAndNestedTypes()
+    {
+        var test = new FieldContainer { Inner = new FieldStruct { Pin = 1234, Code = "secret" } };
+
+        var masked = test.Mask("Inner.Pin", "Inner.Code");
+
+        masked.Inner.Pin.Should().Be(0);
+        masked.Inner.Code.Should().BeNull();
+    }
+
+    [Fact]
+    public void MaskThrowsWhenTargetMemberCannotBeWritten()
+    {
+        var test = new ReadOnlyMembers();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => test.Mask("Token"));
+
+        exception.Message.Should().Contain("Token");
+    }
+
+    [Fact]
     public void MaskRejectsRecursiveJsonPathSelectors()
     {
         var test = new Test { Value1 = "private" };
@@ -479,6 +571,76 @@ public class ObjectExtensionsTests
     private sealed class DerivedItem : BaseItem
     {
         public DateTime Timestamp { get; set; }
+    }
+
+    private sealed class PolymorphicCollection
+    {
+        public List<BaseItem>? Items { get; set; }
+    }
+
+    private enum StrictStatus
+    {
+        None,
+        Active
+    }
+
+    private sealed class ConvertedMembers
+    {
+        [System.Text.Json.Serialization.JsonConverter(typeof(StrictStatusConverter))]
+        public StrictStatus Status { get; set; }
+
+        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+        public StrictStatus Other { get; set; }
+
+        [System.Text.Json.Serialization.JsonConverter(typeof(DayOnlyConverter))]
+        public DateTime Day { get; set; }
+    }
+
+    private sealed class StrictStatusConverter()
+        : System.Text.Json.Serialization.JsonStringEnumConverter<StrictStatus>(allowIntegerValues: false);
+
+    private sealed class DayOnlyConverter : System.Text.Json.Serialization.JsonConverter<DateTime>
+    {
+        public override DateTime Read(
+            ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+        {
+            return DateTime.ParseExact(
+                reader.GetString()!, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        public override void Write(
+            System.Text.Json.Utf8JsonWriter writer, DateTime value, System.Text.Json.JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture));
+        }
+    }
+
+    private sealed class BooleanModel
+    {
+        public bool IsAdmin { get; set; }
+        public bool? MaybeAdmin { get; set; }
+    }
+
+    private sealed class FieldContainer
+    {
+#pragma warning disable S1104 // Public fields are the scenario under test.
+        public FieldStruct Inner;
+#pragma warning restore S1104
+    }
+
+    private struct FieldStruct
+    {
+#pragma warning disable S1104 // Public fields are the scenario under test.
+        public int Pin;
+        public string? Code;
+#pragma warning restore S1104
+    }
+
+    private sealed class ReadOnlyMembers
+    {
+#pragma warning disable S1104, S2933 // Read-only public field is the scenario under test.
+        public readonly string Token = "secret";
+#pragma warning restore S1104, S2933
     }
 
     private sealed class DerivedTest : Test
