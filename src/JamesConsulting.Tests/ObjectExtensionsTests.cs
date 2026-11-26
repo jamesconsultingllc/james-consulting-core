@@ -187,6 +187,83 @@ public class ObjectExtensionsTests
     }
 
     [Fact]
+    public void MaskMasksPublicFields()
+    {
+        var test = new PublicFieldModel { Name = "visible" };
+
+        var masked = test.Mask("Token");
+
+        masked.Token.Should().BeNull();
+        masked.Name.Should().Be("visible");
+    }
+
+    [Fact]
+    public void MaskTreatsDollarPrefixedNamesAsLiteralProperties()
+    {
+        var data = new Dictionary<string, string>
+        {
+            ["$secret"] = "sensitive",
+            ["secret"] = "keep"
+        };
+
+        var masked = data.Mask("$secret");
+
+        masked["$secret"].Should().BeNull();
+        masked["secret"].Should().Be("keep");
+    }
+
+    [Fact]
+    public void MaskSupportsPropertyNamesDifferingOnlyByCase()
+    {
+        var test = new CaseDistinctProperties { Id = "lower", ID = "upper" };
+
+        var masked = test.Mask("ID");
+
+        masked.Id.Should().Be("lower");
+        masked.ID.Should().BeNull();
+    }
+
+    [Fact]
+    public void MaskResolvesDerivedPropertiesOnPolymorphicMembers()
+    {
+        var test = new PolymorphicContainer
+        {
+            Item = new DerivedItem { Name = "derived", Timestamp = DateTime.UtcNow }
+        };
+
+        var masked = test.Mask("Item.Timestamp");
+
+        var item = masked.Item.Should().BeOfType<DerivedItem>().Subject;
+        item.Timestamp.Should().Be(default);
+        item.Name.Should().Be("derived");
+    }
+
+    [Fact]
+    public void MaskPreservesRuntimeTypeWhenCalledThroughPolymorphicBaseType()
+    {
+        var timestamp = DateTime.UtcNow;
+        BaseItem test = new DerivedItem { Name = "secret", Timestamp = timestamp };
+
+        var masked = test.Mask("Name");
+
+        var item = masked.Should().BeOfType<DerivedItem>().Subject;
+        item.Name.Should().BeNull();
+        item.Timestamp.Should().Be(timestamp);
+    }
+
+    [Fact]
+    public void MaskPreservesRuntimeTypeWhenCalledThroughNonPolymorphicBaseType()
+    {
+        Test test = new DerivedTest { Value1 = "secret", Extra = "keep" };
+
+        var masked = test.Mask("Value1");
+
+        var item = masked.Should().BeOfType<DerivedTest>().Subject;
+        item.Value1.Should().BeNull();
+        item.Extra.Should().Be("keep");
+    }
+
+    [Fact]
     public void MaskRejectsRecursiveJsonPathSelectors()
     {
         var test = new Test { Value1 = "private" };
@@ -369,6 +446,44 @@ public class ObjectExtensionsTests
     private struct StructDetails
     {
         public DateTime Timestamp { get; set; }
+    }
+
+    private sealed class PublicFieldModel
+    {
+#pragma warning disable S1104 // Public fields are the scenario under test.
+        public string? Token = "secret";
+#pragma warning restore S1104
+        public string? Name { get; set; }
+    }
+
+    private sealed class CaseDistinctProperties
+    {
+        public string? Id { get; set; }
+#pragma warning disable S100, IDE1006 // Case-distinct names are the scenario under test.
+        public string? ID { get; set; }
+#pragma warning restore S100, IDE1006
+    }
+
+    private sealed class PolymorphicContainer
+    {
+        public BaseItem? Item { get; set; }
+    }
+
+    [System.Text.Json.Serialization.JsonPolymorphic]
+    [System.Text.Json.Serialization.JsonDerivedType(typeof(DerivedItem), "derived")]
+    private class BaseItem
+    {
+        public string? Name { get; set; }
+    }
+
+    private sealed class DerivedItem : BaseItem
+    {
+        public DateTime Timestamp { get; set; }
+    }
+
+    private sealed class DerivedTest : Test
+    {
+        public string? Extra { get; set; }
     }
 
     /// <summary>

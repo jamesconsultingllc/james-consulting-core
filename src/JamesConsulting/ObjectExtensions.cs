@@ -21,6 +21,15 @@ public static class ObjectExtensions
         TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
+    // Mask round-trips an in-memory object, so it must use one case-sensitive contract (including public
+    // fields) for serialization, metadata lookup, and deserialization. Case-insensitive matching is only
+    // appropriate for external input, which uses SerializerOptions.
+    private static readonly JsonSerializerOptions MaskSerializerOptions = new()
+    {
+        IncludeFields = true,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+    };
+
     /// <summary>
     /// Gets the runtime type of an object or returns the generic type parameter when the instance is <c>null</c>.
     /// </summary>
@@ -67,17 +76,20 @@ public static class ObjectExtensions
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
         Guard.NotNullOrEmpty(propertiesToMask);
-        var root = JsonSerializer.SerializeToNode(data, data.GetType());
+        // Serialize and deserialize with the runtime type so a derived instance passed through a base-typed
+        // variable keeps its derived type and data in the masked copy.
+        var runtimeType = data.GetType();
+        var root = JsonSerializer.SerializeToNode(data, runtimeType, MaskSerializerOptions);
         if (root is null)
             throw new InvalidOperationException("The object serialized to JSON null and cannot be masked.");
 
         foreach (var path in propertiesToMask)
         {
-            foreach (var selection in SelectTokens(root, data.GetType(), path, nameof(propertiesToMask)))
+            foreach (var selection in SelectTokens(root, runtimeType, path, nameof(propertiesToMask)))
                 SetValue(selection);
         }
 
-        return root.Deserialize<T>(SerializerOptions)!;
+        return (T)root.Deserialize(runtimeType, MaskSerializerOptions)!;
     }
 
     private static List<NodeSelection> SelectTokens(
@@ -85,7 +97,7 @@ public static class ObjectExtensions
     {
         var nodes = new List<NodeSelection> { new(root, rootType) };
         var index = 0;
-        if (path.StartsWith('$'))
+        if (path == "$" || (path.Length > 1 && path[0] == '$' && path[1] is '.' or '['))
             index++;
 
         while (index < path.Length)
@@ -127,7 +139,7 @@ public static class ObjectExtensions
                         {
                             if (property.Value is not null)
                                 nextNodes.Add(new NodeSelection(
-                                    property.Value, GetPropertyType(selection.Type, property.Key),
+                                    property.Value, GetPropertyType(selection.Type, objectNode, property.Key),
                                     objectNode, property.Key));
                         }
                     }
@@ -136,7 +148,7 @@ public static class ObjectExtensions
                              propertyValue is not null)
                     {
                         nextNodes.Add(new NodeSelection(
-                            propertyValue, GetPropertyType(selection.Type, propertyName),
+                            propertyValue, GetPropertyType(selection.Type, parent, propertyName),
                             parent, propertyName));
                     }
                 }
@@ -210,7 +222,7 @@ public static class ObjectExtensions
                     {
                         if (property.Value is not null)
                             matches.Add(new NodeSelection(
-                                property.Value, GetPropertyType(selection.Type, property.Key),
+                                property.Value, GetPropertyType(selection.Type, objectNode, property.Key),
                                 objectNode, property.Key));
                     }
                 }
@@ -226,7 +238,7 @@ public static class ObjectExtensions
                     propertyValue is not null)
                 {
                     matches.Add(new NodeSelection(
-                        propertyValue, GetPropertyType(selection.Type, propertyName),
+                        propertyValue, GetPropertyType(selection.Type, parent, propertyName),
                         parent, propertyName));
                 }
             }
@@ -269,10 +281,10 @@ public static class ObjectExtensions
         return propertyName.ToString();
     }
 
-    private static Type GetPropertyType(Type parentType, string propertyName)
+    private static Type GetPropertyType(Type parentType, JsonObject parentNode, string propertyName)
     {
         parentType = Nullable.GetUnderlyingType(parentType) ?? parentType;
-        var typeInfo = SerializerOptions.GetTypeInfo(parentType);
+        var typeInfo = ResolveDerivedTypeInfo(MaskSerializerOptions.GetTypeInfo(parentType), parentNode);
         if (typeInfo.Kind == JsonTypeInfoKind.Dictionary)
             return typeInfo.ElementType ?? typeof(object);
 
@@ -285,9 +297,32 @@ public static class ObjectExtensions
         return typeof(object);
     }
 
+    private static JsonTypeInfo ResolveDerivedTypeInfo(JsonTypeInfo typeInfo, JsonObject node)
+    {
+        var polymorphism = typeInfo.PolymorphismOptions;
+        if (polymorphism is null ||
+            !node.TryGetPropertyValue(polymorphism.TypeDiscriminatorPropertyName, out var discriminatorNode) ||
+            discriminatorNode is not JsonValue discriminator)
+            return typeInfo;
+
+        foreach (var derivedType in polymorphism.DerivedTypes)
+        {
+            var matches = derivedType.TypeDiscriminator switch
+            {
+                string name => discriminator.TryGetValue<string>(out var value) && value == name,
+                int id => discriminator.TryGetValue<int>(out var value) && value == id,
+                _ => false
+            };
+            if (matches)
+                return MaskSerializerOptions.GetTypeInfo(derivedType.DerivedType);
+        }
+
+        return typeInfo;
+    }
+
     private static Type GetElementType(Type collectionType)
     {
-        return SerializerOptions.GetTypeInfo(collectionType).ElementType ?? typeof(object);
+        return MaskSerializerOptions.GetTypeInfo(collectionType).ElementType ?? typeof(object);
     }
 
     private static void SetValue(NodeSelection selection)
@@ -299,7 +334,8 @@ public static class ObjectExtensions
         var underlyingType = Nullable.GetUnderlyingType(selection.Type) ?? selection.Type;
         JsonNode? replacement;
         if (value.GetValueKind() == JsonValueKind.String && underlyingType.IsValueType)
-            replacement = JsonSerializer.SerializeToNode(Activator.CreateInstance(underlyingType), underlyingType);
+            replacement = JsonSerializer.SerializeToNode(
+                Activator.CreateInstance(underlyingType), underlyingType, MaskSerializerOptions);
         else
         {
             replacement = value.GetValueKind() switch
