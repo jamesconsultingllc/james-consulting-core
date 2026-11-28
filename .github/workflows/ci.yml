@@ -23,7 +23,6 @@ on:
       - 'docs/**'
       - '.claude/**'
       - 'LICENSE'
-      - '.sonarlint/**'
   pull_request:
     branches: [develop, main, master]
     paths-ignore:
@@ -31,7 +30,6 @@ on:
       - 'docs/**'
       - '.claude/**'
       - 'LICENSE'
-      - '.sonarlint/**'
   workflow_dispatch:
 
 # Cancel stale runs on branch pushes; never cancel a tag publish mid-flight.
