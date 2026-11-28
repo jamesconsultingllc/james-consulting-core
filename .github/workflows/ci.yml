@@ -9,12 +9,31 @@ name: CI
 #   - Push tag v*                                         -> build-test + publish-stable
 #                                                            (version: <major>.<minor>.<patch>; tag must equal version.json
 #                                                             AND commit must be reachable from the stable branch)
+#
+# Changes that touch only Markdown, docs/ or .claude/ don't run this workflow
+# (the paths filters below). Files under those paths that are packed into
+# the NuGet packages are listed again after the exclusions, so changing or
+# deleting them still builds and packs. Tag pushes always run, since GitHub
+# doesn't apply path filters to tags. A release or hotfix branch runs once it
+# changes version.json or code; use workflow_dispatch to force a run.
 on:
   push:
     branches: [develop, main, master, 'feature/**', 'release/**', 'hotfix/**']
     tags:     ['v*']
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!.claude/**'
+      - 'README.md'
   pull_request:
     branches: [develop, main, master]
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!.claude/**'
+      - 'README.md'
   workflow_dispatch:
 
 # Cancel stale runs on branch pushes; never cancel a tag publish mid-flight.
